@@ -1,0 +1,32 @@
+{
+  "name": "droneengage-storage-server",
+  "version": "1.0.0",
+  "description": "Storage server for DroneEngage system - handles task data persistence for units",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --inspect server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "droneengage",
+    "storage",
+    "websocket",
+    "tasks"
+  ],
+  "author": "DroneEngage Team",
+  "license": "proprietary",
+  "dependencies": {
+    "ws": "^8.14.2",
+    "express": "^4.18.2",
+    "winston": "^3.11.0",
+    "sqlite3": "^5.1.6",
+    "better-sqlite3": "^9.2.2",
+    "node-cron": "^3.0.3",
+    "axios": "^1.6.2",
+    "node-file-logger": "^0.0.6"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
