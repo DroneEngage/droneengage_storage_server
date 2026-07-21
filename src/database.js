@@ -278,6 +278,49 @@ class DatabaseManager {
    * Access logging
    */
 
+  // Get pending queue size for a unit
+  getQueueSize(unitId) {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM offline_queue 
+      WHERE unit_id = ? AND status = 'pending'
+    `);
+    return stmt.get(unitId).count;
+  }
+
+  // Get overall queue statistics
+  getQueueStats() {
+    const stmt = this.db.prepare(`
+      SELECT 
+        COUNT(*) as totalMessages,
+        COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) as pendingMessages,
+        COALESCE(COUNT(DISTINCT unit_id), 0) as affectedUnits
+      FROM offline_queue
+      WHERE status = 'pending'
+    `);
+    return stmt.get();
+  }
+
+  // Get queue status for a unit
+  getQueueStatus(unitId) {
+    const stmt = this.db.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered
+      FROM offline_queue
+      WHERE unit_id = ?
+    `);
+    return stmt.get(unitId);
+  }
+
+  // Clear queue for a unit
+  clearQueue(unitId) {
+    const stmt = this.db.prepare(`
+      DELETE FROM offline_queue WHERE unit_id = ?
+    `);
+    return stmt.run(unitId);
+  }
+
   // Log access
   logAccess(unitId, action, resourceType, resourceId, commServerId) {
     const stmt = this.db.prepare(`
@@ -306,7 +349,7 @@ class DatabaseManager {
       units: this.db.prepare('SELECT COUNT(*) as count FROM units').get().count,
       tasks: this.db.prepare('SELECT COUNT(*) as count FROM tasks').get().count,
       disabledTasks: this.db.prepare('SELECT COUNT(*) as count FROM tasks WHERE disabled = 1').get().count,
-      queuedMessages: this.db.prepare('SELECT COUNT(*) as count FROM offline_queue WHERE status = "pending"').get().count,
+      queuedMessages: this.db.prepare("SELECT COUNT(*) as count FROM offline_queue WHERE status = 'pending'").get().count,
       dbSize: fs.statSync(this.dbPath).size
     };
     

@@ -6,12 +6,20 @@ Storage server for DroneEngage system - handles task data persistence for units.
 
 The storage server implements the following architecture:
 
-- **AUTH Registration**: Registers with AUTH server as 'DBServer' type
-- **WebSocket Server**: Accepts S2S WebSocket connections from communication servers
-- **Session Key Validation**: Validates session keys using asymmetric crypto (AUTH public key) or AUTH API fallback
+- **WebSocket Server**: Accepts S2S WebSocket connections from communication servers with Ed25519 challenge-response handshake
 - **Database Persistence**: SQLite database for storing tasks, units, and offline queues
 - **Message Handlers**: Handles task messages (LoadTasks, SaveTasks, DeleteTasks, DisableTasks)
 - **Offline Queue**: Per-unit offline queue for tasks when units are offline
+- **S2S Certificate Authentication**: Validates comm server connections using Ed25519 public keys
+
+## Integration Flow
+
+The storage server integrates with the DroneEngage system as follows:
+
+1. **Comm servers → Storage server (direct WebSocket)**: Comm servers connect directly to storage server using configured endpoint (storage_server_host and storage_server_port in comm server config)
+2. **S2S Authentication**: Comm servers authenticate using Ed25519 challenge-response handshake
+3. **Task operations**: Comm servers forward LoadTasks/SaveTasks/DeleteTasks/DisableTasks to storage server via DBProxyClient
+4. **Status reporting**: Comm servers report storage connection status to AUTH for admin visibility
 
 ## Installation
 
@@ -21,14 +29,29 @@ npm install
 
 ## Configuration
 
-Edit `config/default.json` to configure:
+Edit `server.config` to configure:
 
-- `server.port`: WebSocket server port (default: 9000)
-- `auth.endpoint`: AUTH server endpoint
-- `auth.heartbeatInterval`: Heartbeat interval in ms (default: 30000)
-- `database.path`: SQLite database file path
-- `websocket.pingInterval`: WebSocket ping interval (default: 30000)
+- `server_id`: Server identifier (default: "DE_StorageSrv")
+- `server_ip`: Server IP address (default: "::")
+- `public_host`: Public host address (default: "127.0.0.1")
+- `server_port`: WebSocket server port (default: 9000)
+- `enable_SSL`: Enable SSL/TLS for WebSocket connections (default: true) - SSL is independent of S2S cert auth
+- `ssl_key_file`: Path to SSL private key file (default: "./ssl_local/ssl_airgap/domain.key")
+- `ssl_cert_file`: Path to SSL certificate file (default: "./ssl_local/ssl_airgap/domain.crt")
+- `allow_fake_SSL`: Allow self-signed certificates (default: true)
+- `ca_cert_path`: Path to CA certificate (default: "./ssl_local/ssl_airgap/root.crt")
+- `s2s_cert_enabled`: Enable S2S certificate authentication for comm servers (default: false)
+- `s2s_trusted_server_keys`: Map of trusted comm server IDs to their public key paths
+- `database.path`: SQLite database file path (default: "./data/storage.db")
+- `database.maxConnections`: Maximum SQLite connections (default: 10)
+- `websocket.pingInterval`: WebSocket ping interval in ms (default: 30000)
+- `websocket.pingTimeout`: WebSocket ping timeout in ms (default: 5000)
 - `queue.maxQueueSize`: Maximum queue size per unit (default: 1000)
+- `queue.retryInterval`: Offline queue retry interval in ms (default: 5000)
+- `ignoreLog`: Disable logging (default: false)
+- `log_directory`: Log files directory (default: "./logs/")
+- `log_timeZone`: Timezone for logs (default: "GMT")
+- `log_detailed`: Enable debug logging (default: false)
 
 ## Running
 
@@ -41,62 +64,96 @@ For development with debugging:
 npm run dev
 ```
 
-## API
+### Command-line Options
 
-### Authentication
+- `--config=<filename>`: Use custom config file (default: server.config)
+- `-h, --help`: Display help
+- `-v, --version`: Display version
 
-Communication servers must authenticate using session keys obtained from AUTH:
-
-```json
-{
-  "type": "auth",
-  "sessionKey": "signature.timestamp.commServerId",
-  "commServerId": "comm-server-id"
-}
+Example:
+```bash
+node server.js --config=myconfig.config
 ```
 
+## API
+
+### S2S Authentication
+
+Communication servers authenticate using Ed25519 signature-based challenge-response:
+
+1. Storage server sends a random nonce challenge
+2. Comm server signs the nonce with its private key
+3. Storage server verifies signature using comm server's public key
+4. Authentication successful if signature is valid
+
 ### Task Messages
+
+Task messages use the Andruav protocol format with `mt` (message type) and `ms` (message data):
 
 #### LoadTasks (9001)
 ```json
 {
-  "type": "LoadTasks",
-  "unitId": "unit-id"
+  "mt": 9001,
+  "ms": {
+    "unitId": "unit-id"
+  },
+  "rid": "request-id"
 }
 ```
 
 #### SaveTasks (9002)
 ```json
 {
-  "type": "SaveTasks",
-  "unitId": "unit-id",
-  "tasks": [
-    {
-      "taskId": "task-id",
-      "name": "Task Name",
-      "data": { ... }
-    }
-  ]
+  "mt": 9002,
+  "ms": {
+    "unitId": "unit-id",
+    "tasks": [
+      {
+        "taskId": "task-id",
+        "name": "Task Name",
+        "data": { ... }
+      }
+    ]
+  },
+  "rid": "request-id"
 }
 ```
 
 #### DeleteTasks (9003)
 ```json
 {
-  "type": "DeleteTasks",
-  "unitId": "unit-id",
-  "taskIds": ["task-id-1", "task-id-2"]
+  "mt": 9003,
+  "ms": {
+    "unitId": "unit-id",
+    "taskIds": ["task-id-1", "task-id-2"]
+  },
+  "rid": "request-id"
 }
 ```
 
 #### DisableTasks (9004)
 ```json
 {
-  "type": "DisableTasks",
-  "unitId": "unit-id",
-  "taskIds": ["task-id-1", "task-id-2"]
+  "mt": 9004,
+  "ms": {
+    "unitId": "unit-id",
+    "taskIds": ["task-id-1", "task-id-2"]
+  },
+  "rid": "request-id"
 }
 ```
+
+#### UnitOnline (9009)
+```json
+{
+  "mt": 9009,
+  "ms": {
+    "unitId": "unit-id"
+  }
+}
+```
+
+**Note:** The `rid` (request ID) field is used for request-response correlation by the comm server's DBProxyClient.
 
 ## Database Schema
 
@@ -138,16 +195,22 @@ Communication servers must authenticate using session keys obtained from AUTH:
 
 ## Security
 
-- Session keys are validated using AUTH public key (asymmetric crypto)
-- Fallback to AUTH API validation if public key is not available
-- Session keys are time-limited (4 hours)
+- Ed25519 signature-based authentication for S2S connections
+- Comm servers authenticate to storage server using their private keys
+- Public keys are configured in `s2s_trusted_server_keys`
 - All connections require authentication before processing messages
+- SSL/TLS support for encrypted connections
 
 ## Monitoring
 
-The server logs to `logs/combined.log` and `logs/error.log`.
+The server logs to the directory specified in `log_directory` (default: `./logs/`).
 
-Server statistics can be viewed in the logs on startup.
+Log files are named with date prefix: `Logs_YYYY-MM-DD.log`
+
+Server statistics are displayed on startup:
+- Server ID and listening port
+- Database statistics (size, units, tasks)
+- Active connection count
 
 ## License
 

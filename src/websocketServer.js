@@ -1,4 +1,8 @@
 const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
+const https = require('https');
+const http = require('http');
 const logger = require('./logger');
 const s2sAuth = require('./js_s2s_auth.js');
 const serverConfig = require('../js_serverConfig.js');
@@ -9,6 +13,7 @@ class WebSocketServer {
     this.config = config;
     this.port = config.server_port;
     this.host = config.server_ip;
+    this.enableSSL = config.enable_SSL;
     this.pingInterval = config.websocket.pingInterval;
     this.pingTimeout = config.websocket.pingTimeout;
     this.messageHandlers = messageHandlers;
@@ -22,10 +27,42 @@ class WebSocketServer {
    * Start WebSocket server
    */
   start() {
-    this.wss = new WebSocket.Server({
-      host: this.host,
-      port: this.port
-    });
+    let wserver;
+
+    // Create HTTP or HTTPS server based on SSL configuration
+    if (this.enableSSL) {
+      if (this.config.ssl_cert_file && this.config.ssl_key_file) {
+        const certPath = path.resolve(__dirname, '..', this.config.ssl_cert_file);
+        const keyPath = path.resolve(__dirname, '..', this.config.ssl_key_file);
+
+        if (!fs.existsSync(certPath)) {
+          logger.error(`SSL certificate file not found: ${certPath}`);
+          process.exit(1);
+        }
+
+        if (!fs.existsSync(keyPath)) {
+          logger.error(`SSL key file not found: ${keyPath}`);
+          process.exit(1);
+        }
+
+        const options = {
+          key: fs.readFileSync(keyPath),
+          cert: fs.readFileSync(certPath)
+        };
+
+        wserver = https.createServer(options);
+        logger.info('SSL/TLS enabled for WebSocket server');
+      } else {
+        logger.warn('SSL enabled but cert/key files not configured, falling back to HTTP');
+        wserver = http.createServer();
+      }
+    } else {
+      wserver = http.createServer();
+    }
+
+    wserver.listen(this.port, this.host);
+
+    this.wss = new WebSocket.Server({ server: wserver });
 
     this.wss.on('listening', () => {
       logger.info(`WebSocket server listening on ${this.host}:${this.port}`);
@@ -85,8 +122,15 @@ class WebSocketServer {
       }
     });
 
-    // Send S2S auth challenge
-    this.sendAuthChallenge(connectionId);
+    // Send S2S auth challenge only if s2s_cert_enabled
+    if (this.config.s2s_cert_enabled === true) {
+      this.sendAuthChallenge(connectionId);
+    } else {
+      // If S2S cert auth is disabled, mark as authenticated immediately
+      connectionInfo.authenticated = true;
+      connectionInfo.authPending = false;
+      logger.info(`Connection ${connectionId} accepted without S2S auth (s2s_cert_enabled=false)`);
+    }
   }
 
   /**
@@ -138,7 +182,7 @@ class WebSocketServer {
 
       // Handle normal message
       const message = JSON.parse(data);
-      logger.debug(`Message from connection ${connectionId}: ${message.type}`);
+      logger.debug(`Message from connection ${connectionId}, type: ${message.mt}`);
 
       // Check if authenticated
       if (!connection.authenticated) {
@@ -147,12 +191,12 @@ class WebSocketServer {
         return;
       }
 
-      // Route to appropriate handler
-      if (this.messageHandlers[message.type]) {
-        await this.messageHandlers[message.type](connectionId, message);
+      // Route to appropriate handler by numeric type (mt field)
+      if (this.messageHandlers[message.mt]) {
+        await this.messageHandlers[message.mt](connectionId, message);
       } else {
-        logger.warn(`Unknown message type: ${message.type}`);
-        this.sendError(connectionId, `Unknown message type: ${message.type}`);
+        logger.warn(`Unknown message type: ${message.mt}`);
+        this.sendError(connectionId, `Unknown message type: ${message.mt}`);
       }
     } catch (error) {
       logger.error(`Error handling message from ${connectionId}: ${error.message}`);

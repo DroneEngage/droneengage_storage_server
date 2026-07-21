@@ -19,10 +19,7 @@ class OfflineQueue {
   enqueue(unitId, messageType, messageData, taskId = null, priority = 0) {
     try {
       // Check queue size
-      const queueSize = this.db.prepare(`
-        SELECT COUNT(*) as count FROM offline_queue 
-        WHERE unit_id = ? AND status = 'pending'
-      `).get(unitId).count;
+      const queueSize = this.db.getQueueSize(unitId);
 
       if (queueSize >= this.maxQueueSize) {
         logger.warn(`Queue full for unit ${unitId}, rejecting message`);
@@ -114,16 +111,7 @@ class OfflineQueue {
    */
   getQueueStatus(unitId) {
     try {
-      const status = this.db.prepare(`
-        SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-          SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered
-        FROM offline_queue
-        WHERE unit_id = ?
-      `).get(unitId);
-
-      return status;
+      return this.db.getQueueStatus(unitId);
     } catch (error) {
       logger.error(`Error getting queue status for unit ${unitId}: ${error.message}`);
       return { total: 0, pending: 0, delivered: 0 };
@@ -135,16 +123,7 @@ class OfflineQueue {
    */
   getQueueStats() {
     try {
-      const stats = this.db.prepare(`
-        SELECT 
-          COUNT(*) as totalMessages,
-          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pendingMessages,
-          COUNT(DISTINCT unit_id) as affectedUnits
-        FROM offline_queue
-        WHERE status = 'pending'
-      `).get();
-
-      return stats;
+      return this.db.getQueueStats();
     } catch (error) {
       logger.error(`Error getting queue stats: ${error.message}`);
       return { totalMessages: 0, pendingMessages: 0, affectedUnits: 0 };
@@ -156,9 +135,7 @@ class OfflineQueue {
    */
   clearQueue(unitId) {
     try {
-      const result = this.db.prepare(`
-        DELETE FROM offline_queue WHERE unit_id = ?
-      `).run(unitId);
+      const result = this.db.clearQueue(unitId);
 
       logger.info(`Cleared ${result.changes} messages from queue for unit ${unitId}`);
       return { success: true, cleared: result.changes };

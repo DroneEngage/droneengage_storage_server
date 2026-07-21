@@ -1,6 +1,5 @@
 const serverConfig = require('../js_serverConfig.js');
 const logger = require('./logger');
-const AuthClient = require('./authClient');
 const WebSocketServer = require('./websocketServer');
 const DatabaseManager = require('./database');
 const MessageHandlers = require('./messageHandlers');
@@ -9,7 +8,6 @@ const OfflineQueue = require('./offlineQueue');
 class StorageServer {
   constructor() {
     this.config = serverConfig.m_configuration;
-    this.authClient = null;
     this.wsServer = null;
     this.database = null;
     this.messageHandlers = null;
@@ -49,18 +47,6 @@ class StorageServer {
       // Start WebSocket server
       this.wsServer.start();
 
-      // Initialize AUTH client and connect via S2S
-      logger.info('Initializing AUTH client...');
-      this.authClient = new AuthClient();
-
-      // Connect to AUTH via S2S WebSocket
-      try {
-        await this.authClient.connect();
-        logger.info('Connected to AUTH server');
-      } catch (error) {
-        logger.error(`Failed to connect to AUTH: ${error.message}. Server will continue running.`);
-      }
-
       // Setup graceful shutdown
       this.setupShutdownHandlers();
 
@@ -90,11 +76,6 @@ class StorageServer {
     logger.info('Stopping storage server...');
 
     try {
-      // Disconnect from AUTH
-      if (this.authClient) {
-        this.authClient.disconnect();
-      }
-
       // Stop WebSocket server
       if (this.wsServer) {
         this.wsServer.stop();
@@ -163,8 +144,7 @@ class StorageServer {
   getStatus() {
     return {
       running: this.running,
-      registered: this.authClient ? this.authClient.isRegistered() : false,
-      serverId: this.authClient ? this.authClient.getServerId() : null,
+      serverId: this.config.server_id,
       connections: this.wsServer ? this.wsServer.getConnectionCount() : 0,
       stats: this.database ? this.database.getStats() : null
     };
