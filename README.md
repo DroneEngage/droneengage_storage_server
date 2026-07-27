@@ -44,8 +44,6 @@ Edit `server.config` to configure:
 - `s2s_trusted_server_keys`: Map of trusted comm server IDs to their public key paths
 - `database.path`: SQLite database file path (default: "./data/storage.db")
 - `database.maxConnections`: Maximum SQLite connections (default: 10)
-- `websocket.pingInterval`: WebSocket ping interval in ms (default: 30000)
-- `websocket.pingTimeout`: WebSocket ping timeout in ms (default: 5000)
 - `queue.maxQueueSize`: Maximum queue size per unit (default: 1000)
 - `queue.retryInterval`: Offline queue retry interval in ms (default: 5000)
 - `ignoreLog`: Disable logging (default: false)

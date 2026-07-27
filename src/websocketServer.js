@@ -14,8 +14,6 @@ class WebSocketServer {
     this.port = config.server_port;
     this.host = config.server_ip;
     this.enableSSL = config.enable_SSL;
-    this.pingInterval = config.websocket.pingInterval;
-    this.pingTimeout = config.websocket.pingTimeout;
     this.messageHandlers = messageHandlers;
     
     this.wss = null;
@@ -76,8 +74,8 @@ class WebSocketServer {
       logger.error(`WebSocket server error: ${error.message}`);
     });
 
-    // Setup ping interval for all connections
-    this.setupPingInterval();
+    // No server-side ping/pong — the comm server tracks connection liveness
+    // via its own onClose/reconnect logic and heartbeat to AUTH.
   }
 
   /**
@@ -97,7 +95,6 @@ class WebSocketServer {
       authenticated: false,
       commServerId: null,
       connectedAt: Date.now(),
-      lastPing: Date.now(),
       authPending: true
     };
 
@@ -114,12 +111,6 @@ class WebSocketServer {
 
     ws.on('error', (error) => {
       logger.error(`Connection ${connectionId} error: ${error.message}`);
-    });
-
-    ws.on('pong', () => {
-      if (this.connections.has(connectionId)) {
-        this.connections.get(connectionId).lastPing = Date.now();
-      }
     });
 
     // Send S2S auth challenge only if s2s_cert_enabled
@@ -284,28 +275,6 @@ class WebSocketServer {
     if (connection) {
       connection.ws.close(code, reason);
     }
-  }
-
-  /**
-   * Setup ping interval for all connections
-   */
-  setupPingInterval() {
-    setInterval(() => {
-      const now = Date.now();
-      this.connections.forEach((connection, connectionId) => {
-        if (connection.ws.readyState === WebSocket.OPEN) {
-          // Check for timeout
-          if (now - connection.lastPing > this.pingTimeout) {
-            logger.warn(`Connection ${connectionId} ping timeout, closing`);
-            this.close(connectionId, 1000, 'Ping timeout');
-            return;
-          }
-
-          // Send ping
-          connection.ws.ping();
-        }
-      });
-    }, this.pingInterval);
   }
 
   /**
