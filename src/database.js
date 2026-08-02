@@ -66,6 +66,19 @@ class DatabaseManager {
         FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
       )`,
       
+      // Missions table
+      `CREATE TABLE IF NOT EXISTS missions (
+        id TEXT PRIMARY KEY,
+        unit_id TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        name TEXT,
+        data TEXT NOT NULL,
+        version INTEGER DEFAULT 1,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+      )`,
+      
       // Offline queue table
       `CREATE TABLE IF NOT EXISTS offline_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,6 +113,16 @@ class DatabaseManager {
     });
 
     logger.info('Database tables created');
+
+    // Migration: add account_id column to missions table if missing (backwards compatibility)
+    try {
+      this.db.exec("ALTER TABLE missions ADD COLUMN account_id TEXT NOT NULL DEFAULT '_unknown_'");
+      logger.info('Migration: added account_id column to missions table');
+    } catch (error) {
+      if (error.message.indexOf('duplicate column') === -1) {
+        logger.error(`Migration: failed to add account_id to missions: ${error.message}`);
+      }
+    }
   }
 
   /**
@@ -113,7 +136,9 @@ class DatabaseManager {
       'CREATE INDEX IF NOT EXISTS idx_offline_queue_status ON offline_queue(status)',
       'CREATE INDEX IF NOT EXISTS idx_offline_queue_priority ON offline_queue(priority)',
       'CREATE INDEX IF NOT EXISTS idx_access_log_unit_id ON access_log(unit_id)',
-      'CREATE INDEX IF NOT EXISTS idx_access_log_created_at ON access_log(created_at)'
+      'CREATE INDEX IF NOT EXISTS idx_access_log_created_at ON access_log(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_missions_unit_id ON missions(unit_id)',
+      'CREATE INDEX IF NOT EXISTS idx_missions_account_id ON missions(account_id)'
     ];
 
     indexes.forEach(indexSQL => {
@@ -219,6 +244,60 @@ class DatabaseManager {
     }
     
     return task;
+  }
+
+  /**
+   * Mission operations
+   */
+
+  // Save mission
+  saveMission(missionId, unitId, accountId, name, data) {
+    const stmt = this.db.prepare(`
+      INSERT INTO missions (id, unit_id, account_id, name, data)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        unit_id = excluded.unit_id,
+        account_id = excluded.account_id,
+        name = excluded.name,
+        data = excluded.data,
+        version = version + 1,
+        updated_at = strftime('%s', 'now')
+    `);
+    
+    return stmt.run(missionId, unitId, accountId, name, JSON.stringify(data));
+  }
+
+  // Load missions for unit (scoped by account_id)
+  loadMissions(unitId, accountId) {
+    const stmt = this.db.prepare(`
+      SELECT * FROM missions 
+      WHERE unit_id = ? AND account_id = ?
+      ORDER BY created_at DESC
+    `);
+    
+    const missions = stmt.all(unitId, accountId);
+    return missions.map(mission => ({
+      ...mission,
+      data: JSON.parse(mission.data)
+    }));
+  }
+
+  // Get mission by ID (scoped by account_id)
+  getMission(missionId, accountId) {
+    const stmt = this.db.prepare('SELECT * FROM missions WHERE id = ? AND account_id = ?');
+    const mission = stmt.get(missionId, accountId);
+    
+    if (mission) {
+      mission.data = JSON.parse(mission.data);
+    }
+    
+    return mission;
+  }
+
+  // Delete mission (scoped by account_id)
+  deleteMission(missionId, accountId) {
+    const stmt = this.db.prepare('DELETE FROM missions WHERE id = ? AND account_id = ?');
+    return stmt.run(missionId, accountId);
   }
 
   /**
@@ -349,6 +428,7 @@ class DatabaseManager {
       units: this.db.prepare('SELECT COUNT(*) as count FROM units').get().count,
       tasks: this.db.prepare('SELECT COUNT(*) as count FROM tasks').get().count,
       disabledTasks: this.db.prepare('SELECT COUNT(*) as count FROM tasks WHERE disabled = 1').get().count,
+      missions: this.db.prepare('SELECT COUNT(*) as count FROM missions').get().count,
       queuedMessages: this.db.prepare("SELECT COUNT(*) as count FROM offline_queue WHERE status = 'pending'").get().count,
       dbSize: fs.statSync(this.dbPath).size
     };

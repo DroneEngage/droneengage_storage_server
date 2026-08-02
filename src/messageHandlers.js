@@ -7,6 +7,9 @@ const CONST_TYPE_AndruavSystem_SaveTasks = 9002;
 const CONST_TYPE_AndruavSystem_DeleteTasks = 9003;
 const CONST_TYPE_AndruavSystem_DisableTasks = 9004;
 const CONST_TYPE_AndruavSystem_UnitOnline = 9009; // Custom message for unit online event (aligned with shared AndruavMessageTypes enum)
+const CONST_TYPE_AndruavSystem_LoadMission = 9010; // Load mission from storage
+const CONST_TYPE_AndruavSystem_SaveMission = 9011; // Save mission to storage
+const CONST_TYPE_AndruavSystem_DeleteMission = 9012; // Delete mission from storage
 
 class MessageHandlers {
   constructor(db, wsServer) {
@@ -189,7 +192,7 @@ class MessageHandlers {
   }
 
   /**
-   * Handle UnitOnline message (9010) - Trigger offline queue processing
+   * Handle UnitOnline message (9009) - Trigger offline queue processing
    */
   async handleUnitOnline(connectionId, message) {
     const payload = this.getPayload(message);
@@ -225,6 +228,116 @@ class MessageHandlers {
   }
 
   /**
+   * Handle LoadMission message (9010)
+   */
+  async handleLoadMission(connectionId, message) {
+    const payload = this.getPayload(message);
+    const { unitId, missionId, accountId } = payload;
+    const connection = this.wsServer.getConnection(connectionId);
+
+    try {
+      logger.info(`LoadMission request for unit ${unitId}${missionId ? ', mission ' + missionId : ''} from comm server ${connection.commServerId}`);
+
+      let mission;
+      if (missionId) {
+        // Load specific mission
+        mission = this.db.getMission(missionId, accountId);
+      } else {
+        // Load all missions for unit (scoped by account)
+        const missions = this.db.loadMissions(unitId, accountId);
+        mission = missions;
+      }
+
+      // Log access
+      this.db.logAccess(unitId, 'load', 'mission', missionId || null, connection.commServerId);
+
+      // Send response
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_LoadMission, {
+        s: 'OK',
+        mission: mission,
+        unitId: unitId
+      }, true));
+
+      logger.info(`Loaded mission for unit ${unitId}`);
+    } catch (error) {
+      logger.error(`Error loading mission for unit ${unitId}: ${error.message}`);
+      
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_LoadMission, {
+        s: 'ERROR:' + error.message,
+        unitId: unitId
+      }, false, error.message));
+    }
+  }
+
+  /**
+   * Handle SaveMission message (9011)
+   */
+  async handleSaveMission(connectionId, message) {
+    const payload = this.getPayload(message);
+    const { unitId, missionId, accountId, name, data } = payload;
+    const connection = this.wsServer.getConnection(connectionId);
+
+    try {
+      logger.info(`SaveMission request for unit ${unitId}, mission ${missionId}`);
+
+      // Ensure unit exists
+      this.db.upsertUnit(unitId, null, connection.commServerId);
+
+      // Save mission
+      this.db.saveMission(missionId, unitId, accountId, name, data);
+
+      // Log access
+      this.db.logAccess(unitId, 'save', 'mission', missionId, connection.commServerId);
+
+      // Send response
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
+        s: 'OK:save',
+        missionId: missionId,
+        unitId: unitId
+      }, true));
+
+      logger.info(`Saved mission ${missionId} for unit ${unitId}`);
+    } catch (error) {
+      logger.error(`Error saving mission for unit ${unitId}: ${error.message}`);
+      
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
+        s: 'ERROR:' + error.message,
+        unitId: unitId
+      }, false, error.message));
+    }
+  }
+
+  /**
+   * Handle DeleteMission message (9012)
+   */
+  async handleDeleteMission(connectionId, message) {
+    const payload = this.getPayload(message);
+    const { missionId, accountId } = payload;
+    const connection = this.wsServer.getConnection(connectionId);
+
+    try {
+      logger.info(`DeleteMission request for mission ${missionId}`);
+
+      const result = this.db.deleteMission(missionId, accountId);
+
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_DeleteMission, {
+        s: 'OK:delete',
+        missionId: missionId,
+        deleted: result.changes
+      }, true));
+
+      logger.info(`Deleted mission ${missionId} (changes: ${result.changes})`);
+    } catch (error) {
+      logger.error(`Error deleting mission ${missionId}: ${error.message}`);
+      
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_DeleteMission, {
+        s: 'ERROR:' + error.message,
+        missionId: missionId
+      }, false, error.message));
+    }
+  }
+
+  /**
    * Handle message by numeric type (mt field)
    */
   async handleMessageByType(connectionId, message) {
@@ -246,6 +359,15 @@ class MessageHandlers {
       case CONST_TYPE_AndruavSystem_UnitOnline:
         await this.handleUnitOnline(connectionId, message);
         break;
+      case CONST_TYPE_AndruavSystem_LoadMission:
+        await this.handleLoadMission(connectionId, message);
+        break;
+      case CONST_TYPE_AndruavSystem_SaveMission:
+        await this.handleSaveMission(connectionId, message);
+        break;
+      case CONST_TYPE_AndruavSystem_DeleteMission:
+        await this.handleDeleteMission(connectionId, message);
+        break;
       default:
         logger.warn(`Unknown message type: ${messageType}`);
         this.wsServer.sendError(connectionId, `Unknown message type: ${messageType}`);
@@ -261,7 +383,10 @@ class MessageHandlers {
       [CONST_TYPE_AndruavSystem_SaveTasks]: this.handleSaveTasks.bind(this),
       [CONST_TYPE_AndruavSystem_DeleteTasks]: this.handleDeleteTasks.bind(this),
       [CONST_TYPE_AndruavSystem_DisableTasks]: this.handleDisableTasks.bind(this),
-      [CONST_TYPE_AndruavSystem_UnitOnline]: this.handleUnitOnline.bind(this)
+      [CONST_TYPE_AndruavSystem_UnitOnline]: this.handleUnitOnline.bind(this),
+      [CONST_TYPE_AndruavSystem_LoadMission]: this.handleLoadMission.bind(this),
+      [CONST_TYPE_AndruavSystem_SaveMission]: this.handleSaveMission.bind(this),
+      [CONST_TYPE_AndruavSystem_DeleteMission]: this.handleDeleteMission.bind(this)
     };
   }
 }
