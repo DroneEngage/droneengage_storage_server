@@ -11,7 +11,7 @@ class WebSocketServer {
   constructor(messageHandlers) {
     const config = serverConfig.m_configuration;
     this.config = config;
-    this.port = config.server_port;
+    this.port = process.env.de_storage_server_port || config.server_port;
     this.host = config.server_ip;
     this.enableSSL = config.enable_SSL;
     this.messageHandlers = messageHandlers;
