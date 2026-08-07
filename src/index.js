@@ -52,7 +52,7 @@ class StorageServer {
 
       this.running = true;
       logger.info('Storage server started successfully');
-      logger.info(`Server endpoint: ${this.config.public_host}:${this.config.server_port}`);
+      logger.info(`Server endpoint: ${this.config.public_host}:${process.env.de_storage_server_port || this.config.server_port}`);
       logger.info(`Database: ${this.config.database.path}`);
 
       // Print stats
