@@ -83,7 +83,7 @@ See [Offline Queue](OfflineQueue.md) for details.
 
 ## Startup Flow
 
-The startup sequence in `server.js` → `StorageServer.start()`:
+The startup sequence in `src/server.js` → `StorageServer.start()`:
 
 1. **Parse CLI args** (`fn_parseArgs`): `--config`, `-h`, `-v`.
 2. **Load config** (`serverConfig.init`): reads `server.config`, strips JSON comments, parses.
@@ -110,11 +110,11 @@ A memory check runs every 60 seconds. If RSS exceeds `memory_max` (when configur
 
 ```
 droneengage_storage_server/
-├── server.js                  # Entry point: arg parsing, config loading, startup
 ├── js_serverConfig.js         # Config loader (strips JSON comments)
 ├── server.config              # Default configuration file
 ├── package.json
 ├── src/
+│   ├── server.js              # Entry point: arg parsing, config loading, startup
 │   ├── index.js               # StorageServer orchestrator class
 │   ├── websocketServer.js     # WebSocket server + S2S auth challenge
 │   ├── messageHandlers.js     # Message type → handler routing (9001-9012)

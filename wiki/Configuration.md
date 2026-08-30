@@ -9,7 +9,7 @@ The server is configured via `server.config` (JSON with C-style comments). The c
 A custom config file can be specified via CLI:
 
 ```bash
-node server.js --config=myconfig.config
+node src/server.js --config=myconfig.config
 ```
 
 The config file path is resolved relative to the project root (`__dirname` of `js_serverConfig.js`).
@@ -136,4 +136,4 @@ An optional `memory_max` setting (in MB) can be added to the config. When RSS me
 }
 ```
 
-This is checked every 60 seconds by the `checkMemory()` function in `server.js`.
+This is checked every 60 seconds by the `checkMemory()` function in `src/server.js`.

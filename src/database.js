@@ -411,6 +411,150 @@ class DatabaseManager {
   }
 
   /**
+   * Read-only paginated queries for the admin dashboard.
+   * These mirror the existing unit-scoped methods but return flat paginated
+   * lists for browsing.  All are read-only — the dashboard never writes.
+   */
+
+  // Paginated access_log (the "messages" view) with optional filters
+  getAccessLogPage({ page = 1, limit = 50, action = null, unitId = null } = {}) {
+    const p = Math.max(1, page);
+    const l = Math.min(500, Math.max(1, limit));
+    const offset = (p - 1) * l;
+
+    let where = [];
+    let params = [];
+    if (action) { where.push('action = ?'); params.push(action); }
+    if (unitId) { where.push('unit_id = ?'); params.push(unitId); }
+    const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+
+    const total = this.db.prepare('SELECT COUNT(*) as count FROM access_log' + whereClause).get(...params).count;
+    const rows = this.db.prepare('SELECT * FROM access_log' + whereClause + ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?').all(...params, l, offset);
+
+    return { rows, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
+  }
+
+  // Paginated units list with optional search
+  getUnitsPage({ page = 1, limit = 50, search = null } = {}) {
+    const p = Math.max(1, page);
+    const l = Math.min(500, Math.max(1, limit));
+    const offset = (p - 1) * l;
+
+    let where = '';
+    let params = [];
+    if (search) {
+      where = ' WHERE id LIKE ? OR name LIKE ? OR comm_server_id LIKE ?';
+      const like = '%' + search + '%';
+      params = [like, like, like];
+    }
+
+    const total = this.db.prepare('SELECT COUNT(*) as count FROM units' + where).get(...params).count;
+    const rows = this.db.prepare('SELECT * FROM units' + where + ' ORDER BY updated_at DESC LIMIT ? OFFSET ?').all(...params, l, offset);
+
+    // Attach per-unit counts for the table
+    const countStmt = this.db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM tasks WHERE unit_id = ?) AS tasks,
+        (SELECT COUNT(*) FROM tasks WHERE unit_id = ? AND disabled = 1) AS disabledTasks,
+        (SELECT COUNT(*) FROM missions WHERE unit_id = ?) AS missions,
+        (SELECT COUNT(*) FROM offline_queue WHERE unit_id = ? AND status = 'pending') AS pendingQueue
+    `);
+    const enriched = rows.map(u => {
+      const c = countStmt.get(u.id, u.id, u.id, u.id);
+      return { ...u, ...c };
+    });
+
+    return { rows: enriched, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
+  }
+
+  // Paginated tasks list, optionally filtered by unit
+  getTasksPage({ page = 1, limit = 50, unitId = null, includeDisabled = true } = {}) {
+    const p = Math.max(1, page);
+    const l = Math.min(500, Math.max(1, limit));
+    const offset = (p - 1) * l;
+
+    let where = [];
+    let params = [];
+    if (unitId) { where.push('unit_id = ?'); params.push(unitId); }
+    if (!includeDisabled) { where.push('disabled = 0'); }
+    const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+
+    const total = this.db.prepare('SELECT COUNT(*) as count FROM tasks' + whereClause).get(...params).count;
+    const rows = this.db.prepare('SELECT * FROM tasks' + whereClause + ' ORDER BY updated_at DESC LIMIT ? OFFSET ?').all(...params, l, offset);
+
+    // Parse the JSON data column for display
+    const parsed = rows.map(t => {
+      try { t.data = JSON.parse(t.data); } catch (e) { /* leave raw */ }
+      return t;
+    });
+
+    return { rows: parsed, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
+  }
+
+  // Paginated missions list, optionally filtered by unit/account
+  getMissionsPage({ page = 1, limit = 50, unitId = null, accountId = null } = {}) {
+    const p = Math.max(1, page);
+    const l = Math.min(500, Math.max(1, limit));
+    const offset = (p - 1) * l;
+
+    let where = [];
+    let params = [];
+    if (unitId) { where.push('unit_id = ?'); params.push(unitId); }
+    if (accountId) { where.push('account_id = ?'); params.push(accountId); }
+    const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+
+    const total = this.db.prepare('SELECT COUNT(*) as count FROM missions' + whereClause).get(...params).count;
+    const rows = this.db.prepare('SELECT * FROM missions' + whereClause + ' ORDER BY updated_at DESC LIMIT ? OFFSET ?').all(...params, l, offset);
+
+    const parsed = rows.map(m => {
+      try { m.data = JSON.parse(m.data); } catch (e) { /* leave raw */ }
+      return m;
+    });
+
+    return { rows: parsed, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
+  }
+
+  // Paginated offline_queue list, optionally filtered by unit/status
+  getQueuePage({ page = 1, limit = 50, unitId = null, status = null } = {}) {
+    const p = Math.max(1, page);
+    const l = Math.min(500, Math.max(1, limit));
+    const offset = (p - 1) * l;
+
+    let where = [];
+    let params = [];
+    if (unitId) { where.push('unit_id = ?'); params.push(unitId); }
+    if (status) { where.push('status = ?'); params.push(status); }
+    const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+
+    const total = this.db.prepare('SELECT COUNT(*) as count FROM offline_queue' + whereClause).get(...params).count;
+    const rows = this.db.prepare('SELECT * FROM offline_queue' + whereClause + ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?').all(...params, l, offset);
+
+    const parsed = rows.map(q => {
+      try { q.message_data = JSON.parse(q.message_data); } catch (e) { /* leave raw */ }
+      return q;
+    });
+
+    return { rows: parsed, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
+  }
+
+  // Distinct account_ids that have missions (for the missions filter dropdown)
+  getMissionAccounts() {
+    return this.db.prepare('SELECT DISTINCT account_id FROM missions ORDER BY account_id ASC').all().map(r => r.account_id);
+  }
+
+  // Distinct unit_ids present anywhere (units table + tasks + missions + queue)
+  getAllUnitIds() {
+    const rows = this.db.prepare(`
+      SELECT id AS unit_id FROM units
+      UNION SELECT unit_id FROM tasks
+      UNION SELECT unit_id FROM missions
+      UNION SELECT unit_id FROM offline_queue
+      ORDER BY unit_id ASC
+    `).all();
+    return rows.map(r => r.unit_id);
+  }
+
+  /**
    * Utility functions
    */
 

@@ -70,7 +70,7 @@ npm run dev
 
 Example:
 ```bash
-node server.js --config=myconfig.config
+node src/server.js --config=myconfig.config
 ```
 
 ## API

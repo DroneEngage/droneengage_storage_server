@@ -1,12 +1,12 @@
 "use strict";
 
-const v_pjson           = require('./package.json');
-global.Colors           = require ("./helpers/js_colors.js").Colors;
-global.m_serverconfig   = require ('./js_serverConfig.js'); 
+const v_pjson           = require('../package.json');
+global.Colors           = require ("../helpers/js_colors.js").Colors;
+global.m_serverconfig   = require ('../js_serverConfig.js');
 
 let v_configFileName = global.m_serverconfig.getFileName();
 
-const m_storage_server = require ('./src/index.js');
+const m_storage_server = require ('./index.js');
 
 process.on('SIGINT', function() {
     if (global.m_logger) global.m_logger.Warn('SIGINT.');
@@ -91,7 +91,7 @@ function fn_displayInfo ()
 
 function fn_parseArgs()
 {
-    const c_args = require ('./helpers/hlp_args.js');
+    const c_args = require ('../helpers/hlp_args.js');
 
     var cmds = c_args.getArgs();
     if (cmds.hasOwnProperty('h') || cmds.hasOwnProperty('help'))
