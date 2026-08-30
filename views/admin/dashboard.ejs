@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link href="/public/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #212529; color: #f8f9fa; }
+        .navbar-custom { background: #343a40; }
+        .navbar-custom .navbar-brand,
+        .navbar-custom .nav-link { color: #f8f9fa !important; }
+        .card { background: #2c3034; border: 1px solid #495057; }
+        .card-title { color: #e9ecef; }
+        .card-body strong { color: #f8f9fa; }
+        .stat-value { font-size: 2.5rem; font-weight: bold; color: #0d6efd; }
+        .text-muted { color: #adb5bd !important; }
+        .btn-primary { background: #0d6efd; border: none; }
+        .btn-primary:hover { background: #0b5ed7; }
+        .btn-outline-light { border-color: #f8f9fa; color: #f8f9fa; }
+        .btn-outline-light:hover { background: #f8f9fa; color: #212529; }
+    </style>
+</head>
+<body>
+    <%- include('../common/navbar', { activePage: 'dashboard', navbarFixed: false, dashboardGuid: dashboardGuid, adminUsername: adminUsername }) %>
+
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col-12">
+                <a href="/admin<%= dashboardGuid ? '/' + dashboardGuid : '' %>/messages" class="btn btn-primary me-2">View Messages</a>
+                <a href="/admin<%= dashboardGuid ? '/' + dashboardGuid : '' %>/units" class="btn btn-primary me-2">View Units</a>
+                <a href="/admin<%= dashboardGuid ? '/' + dashboardGuid : '' %>/queue" class="btn btn-primary">View Queue</a>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-3 mb-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Units</h5>
+                        <div class="stat-value" id="units">-</div>
+                        <p class="text-muted">Registered units</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Tasks</h5>
+                        <div class="stat-value" id="tasks">-</div>
+                        <p class="text-muted"><span id="disabledTasks">-</span> disabled</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Missions</h5>
+                        <div class="stat-value" id="missions">-</div>
+                        <p class="text-muted">Account-scoped missions</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Pending Queue</h5>
+                        <div class="stat-value" id="pendingQueue">-</div>
+                        <p class="text-muted"><span id="affectedUnits">-</span> units affected</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-3 mb-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">DB Size</h5>
+                        <div class="stat-value" id="dbSize">-</div>
+                        <p class="text-muted">SQLite file (MB)</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">WS Connections</h5>
+                        <div class="stat-value" id="connections">-</div>
+                        <p class="text-muted">Active comm server connections</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Server</h5>
+                        <p class="mb-1"><strong>Server ID:</strong> <span id="serverId">-</span></p>
+                        <p class="mb-1"><strong>Database path:</strong> <span id="dbPath">-</span></p>
+                        <p class="mb-0 text-muted">Read-only dashboard — all writes go through the S2S WebSocket path.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/public/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function loadStats() {
+            try {
+                const response = await fetch('/admin/api/stats');
+                const data = await response.json();
+                if (data.error) return;
+                const s = data.stats;
+                document.getElementById('units').textContent = s.units ?? 0;
+                document.getElementById('tasks').textContent = s.tasks ?? 0;
+                document.getElementById('disabledTasks').textContent = s.disabledTasks ?? 0;
+                document.getElementById('missions').textContent = s.missions ?? 0;
+                document.getElementById('pendingQueue').textContent = s.pendingMessages ?? 0;
+                document.getElementById('affectedUnits').textContent = s.affectedUnits ?? 0;
+                document.getElementById('dbSize').textContent = s.dbSizeMB ?? 0;
+                document.getElementById('connections').textContent = s.connections ?? 0;
+                document.getElementById('serverId').textContent = '<%= (typeof serverId !== "undefined") ? serverId : "DE_StorageSrv" %>';
+                document.getElementById('dbPath').textContent = '<%= (typeof dbPath !== "undefined") ? dbPath : "data/storage.db" %>';
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        loadStats();
+        setInterval(loadStats, 30000);
+    </script>
+</body>
+</html>

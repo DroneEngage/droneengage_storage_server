@@ -36,7 +36,7 @@ npm install
 npm start
 ```
 
-This runs `node server.js`.
+This runs `node src/server.js`.
 
 ### Development (with debugger)
 
@@ -44,12 +44,12 @@ This runs `node server.js`.
 npm run dev
 ```
 
-This runs `node --inspect server.js`, enabling the Node.js debugger on port 9229.
+This runs `node --inspect src/server.js`, enabling the Node.js debugger on port 9229.
 
 ### Custom Configuration
 
 ```bash
-node server.js --config=myconfig.config
+node src/server.js --config=myconfig.config
 ```
 
 ### Port Override
@@ -203,7 +203,7 @@ After=network.target
 Type=simple
 User=droneengage
 WorkingDirectory=/opt/droneengage/droneengage_storage_server
-ExecStart=/usr/bin/node server.js
+ExecStart=/usr/bin/node src/server.js
 Restart=always
 RestartSec=5
 Environment=de_storage_server_port=9000

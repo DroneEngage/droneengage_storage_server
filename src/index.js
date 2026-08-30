@@ -58,6 +58,12 @@ class StorageServer {
       // Print stats
       this.printStats();
 
+      // Start the admin dashboard (separate HTTP server, read-only)
+      if (this.config.dashboard_enable) {
+        const dashboard = require('./dashboard/js_dashboard_server');
+        dashboard.start(this.database, this.wsServer);
+      }
+
     } catch (error) {
       logger.error(`Failed to start storage server: ${error.message}`);
       await this.stop();
@@ -79,6 +85,12 @@ class StorageServer {
       // Stop WebSocket server
       if (this.wsServer) {
         this.wsServer.stop();
+      }
+
+      // Stop dashboard server
+      if (this.config.dashboard_enable) {
+        const dashboard = require('./dashboard/js_dashboard_server');
+        dashboard.stop();
       }
 
       // Close database

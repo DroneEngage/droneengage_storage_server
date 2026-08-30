@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link href="/public/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #212529; color: #f8f9fa; }
+        .navbar-custom { background: #343a40; }
+        .navbar-custom .navbar-brand,
+        .navbar-custom .nav-link { color: #f8f9fa !important; }
+        .card { background: #2c3034; border: 1px solid #495057; }
+        .card-header { background: #2c3034; border-bottom: 1px solid #495057; color: #f8f9fa; }
+        .text-muted { color: #adb5bd !important; }
+        .btn-primary { background: #0d6efd; border: none; }
+        .btn-primary:hover { background: #0b5ed7; }
+        .btn-outline-light { border-color: #f8f9fa; color: #f8f9fa; }
+        .btn-outline-light:hover { background: #f8f9fa; color: #212529; }
+        .table { color: #f8f9fa; border-color: #495057; }
+        .table > :not(caption) > * > * {
+            background-color: transparent; color: #f8f9fa; border-color: #495057;
+        }
+        .table-light { background: #2c3034; color: #f8f9fa; }
+        .form-control {
+            background: #2c3034; border: 1px solid #495057; color: #f8f9fa;
+        }
+        .form-control:focus {
+            background: #2c3034; border-color: #86b7fe; color: #f8f9fa;
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+        }
+    </style>
+</head>
+<body>
+    <%- include('../common/navbar', { activePage: 'units', navbarFixed: false, dashboardGuid: dashboardGuid, adminUsername: adminUsername }) %>
+
+    <div class="container-fluid mt-4">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Units</h5>
+                <button class="btn btn-primary btn-sm" onclick="loadUnits()">Refresh</button>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-5">
+                        <input type="text" class="form-control form-control-sm" id="searchBox" placeholder="search id, name, or comm_server_id">
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button class="btn btn-primary btn-sm w-100" onclick="loadUnits(1)">Search</button>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-striped table-bordered">
+                        <thead class="table-light">
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Comm Server</th>
+                                <th>Tasks</th>
+                                <th>Disabled</th>
+                                <th>Missions</th>
+                                <th>Pending Queue</th>
+                                <th>Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody id="unitsBody">
+                            <tr><td colspan="8" class="text-center text-muted">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted small" id="pageInfo">-</span>
+                    <div>
+                        <button class="btn btn-outline-light btn-sm me-2" id="prevBtn" onclick="changePage(-1)">Previous</button>
+                        <button class="btn btn-outline-light btn-sm" id="nextBtn" onclick="changePage(1)">Next</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/public/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let m_page = 1;
+        const m_limit = 50;
+
+        function fmtTime(epoch) {
+            if (!epoch) return '-';
+            return new Date(epoch * 1000).toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+        }
+
+        async function loadUnits(page) {
+            if (page) m_page = page;
+            const search = document.getElementById('searchBox').value.trim();
+            const params = new URLSearchParams({ page: m_page, limit: m_limit });
+            if (search) params.set('search', search);
+
+            try {
+                const res = await fetch('/admin/api/units?' + params.toString());
+                const data = await res.json();
+                if (data.error) { alert(data.errorMessage); return; }
+
+                const body = document.getElementById('unitsBody');
+                if (!data.rows || data.rows.length === 0) {
+                    body.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No units found</td></tr>';
+                } else {
+                    body.innerHTML = data.rows.map(u => `
+                        <tr>
+                            <td class="small">${u.id}</td>
+                            <td class="small">${u.name || '-'}</td>
+                            <td class="small">${u.comm_server_id || '-'}</td>
+                            <td>${u.tasks ?? 0}</td>
+                            <td>${u.disabledTasks ?? 0}</td>
+                            <td>${u.missions ?? 0}</td>
+                            <td>${u.pendingQueue ?? 0}</td>
+                            <td class="small">${fmtTime(u.updated_at)}</td>
+                        </tr>
+                    `).join('');
+                }
+
+                const totalPages = data.totalPages || 1;
+                document.getElementById('pageInfo').textContent =
+                    `Page ${data.page} of ${totalPages} — ${data.total} total`;
+                document.getElementById('prevBtn').disabled = data.page <= 1;
+                document.getElementById('nextBtn').disabled = data.page >= totalPages;
+            } catch (e) {
+                console.error('Error loading units:', e);
+            }
+        }
+
+        function changePage(delta) { loadUnits(m_page + delta); }
+        loadUnits(1);
+    </script>
+</body>
+</html>
