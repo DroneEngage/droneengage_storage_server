@@ -355,6 +355,28 @@ router.get('/api/messages', requireAuth, (req, res) => {
     }
 });
 
+// API: physically delete access_log rows.  Optional action/unitId filters
+// restrict the deletion to a subset; without filters the whole log is wiped.
+// This is the only write operation exposed by the dashboard and is intended
+// for manual maintenance (e.g. purging an oversized audit trail).
+router.delete('/api/messages', requireAuth, (req, res) => {
+    try {
+        const db = getDb(req);
+        if (!db) return res.json({ error: 1, errorMessage: 'Database not available' });
+        const action = (req.query.action || '').trim() || null;
+        const unitId = (req.query.unitId || '').trim() || null;
+        const result = db.clearAccessLog({ action, unitId });
+        console.log(`[dashboard] access_log cleared by ${req.session.adminUsername}: ` +
+            `${result.deleted} rows removed` +
+            (action ? ` (action=${action})` : '') +
+            (unitId ? ` (unitId=${unitId})` : ''));
+        res.json({ error: 0, ...result });
+    } catch (error) {
+        console.error('Error clearing messages:', error);
+        res.json({ error: 1, errorMessage: 'Failed to clear messages' });
+    }
+});
+
 // API: units — paginated, searchable
 router.get('/api/units', requireAuth, (req, res) => {
     try {

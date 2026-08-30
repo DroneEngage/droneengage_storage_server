@@ -43,7 +43,10 @@
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Access Log (Messages)</h5>
-                <button class="btn btn-primary btn-sm" onclick="loadMessages()">Refresh</button>
+                <div>
+                    <button class="btn btn-danger btn-sm me-2" onclick="clearMessages()">Delete</button>
+                    <button class="btn btn-primary btn-sm" onclick="loadMessages()">Refresh</button>
+                </div>
             </div>
             <div class="card-body">
                 <p class="text-muted mb-3">Audit trail of every load/save/delete/disable operation performed by the storage server.</p>
@@ -154,6 +157,41 @@
 
         function changePage(delta) {
             loadMessages(m_page + delta);
+        }
+
+        async function clearMessages() {
+            const action = document.getElementById('filterAction').value;
+            const unit = document.getElementById('filterUnit').value.trim();
+
+            let scope = 'ALL access log entries';
+            const parts = [];
+            if (action) parts.push(`action="${action}"`);
+            if (unit) parts.push(`unitId="${unit}"`);
+            if (parts.length) scope = 'entries matching ' + parts.join(' AND ');
+
+            const ok = confirm(
+                `This will PERMANENTLY DELETE ${scope}.\n\n` +
+                `This cannot be undone. Continue?`
+            );
+            if (!ok) return;
+
+            try {
+                const params = new URLSearchParams();
+                if (action) params.set('action', action);
+                if (unit) params.set('unitId', unit);
+
+                const res = await fetch('/admin/api/messages' + (params.toString() ? '?' + params.toString() : ''), {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+                if (data.error) { alert(data.errorMessage || 'Failed to clear messages'); return; }
+                alert(`${data.deleted} message(s) deleted.`);
+                m_page = 1;
+                loadMessages(1);
+            } catch (e) {
+                console.error('Error clearing messages:', e);
+                alert('Failed to clear messages.');
+            }
         }
 
         loadMessages(1);
