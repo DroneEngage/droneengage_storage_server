@@ -406,8 +406,21 @@ class DatabaseManager {
       INSERT INTO access_log (unit_id, action, resource_type, resource_id, comm_server_id)
       VALUES (?, ?, ?, ?, ?)
     `);
-    
+
     return stmt.run(unitId, action, resourceType, resourceId, commServerId);
+  }
+
+  // Physically delete all access_log rows.  Returns the number of rows removed.
+  // Optional filters (action, unitId) restrict the deletion to a subset.
+  clearAccessLog({ action = null, unitId = null } = {}) {
+    let where = [];
+    let params = [];
+    if (action) { where.push('action = ?'); params.push(action); }
+    if (unitId) { where.push('unit_id = ?'); params.push(unitId); }
+    const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+
+    const result = this.db.prepare('DELETE FROM access_log' + whereClause).run(...params);
+    return { deleted: result.changes || 0 };
   }
 
   /**
