@@ -257,6 +257,19 @@ class WebSocketServer {
   }
 
   /**
+   * Broadcast a message to every authenticated connection (all connected
+   * comm servers). Used for unsolicited pushes (e.g. NewsPush) that must
+   * reach every comm server, not just the one that made the original request.
+   */
+  broadcast(data) {
+    this.connections.forEach((connection, connectionId) => {
+      if (connection.authenticated) {
+        this.send(connectionId, data);
+      }
+    });
+  }
+
+  /**
    * Send error message
    */
   sendError(connectionId, error) {
