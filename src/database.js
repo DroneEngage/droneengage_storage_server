@@ -79,6 +79,21 @@ class DatabaseManager {
         FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
       )`,
       
+      // News table
+      `CREATE TABLE IF NOT EXISTS news (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL,
+        account_id TEXT,
+        title TEXT,
+        body TEXT NOT NULL,
+        priority INTEGER DEFAULT 0,
+        author_id TEXT,
+        expires_at INTEGER,
+        disabled INTEGER DEFAULT 0,
+        created_at INTEGER DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+      )`,
+
       // Offline queue table
       `CREATE TABLE IF NOT EXISTS offline_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,7 +153,11 @@ class DatabaseManager {
       'CREATE INDEX IF NOT EXISTS idx_access_log_unit_id ON access_log(unit_id)',
       'CREATE INDEX IF NOT EXISTS idx_access_log_created_at ON access_log(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_missions_unit_id ON missions(unit_id)',
-      'CREATE INDEX IF NOT EXISTS idx_missions_account_id ON missions(account_id)'
+      'CREATE INDEX IF NOT EXISTS idx_missions_account_id ON missions(account_id)',
+      'CREATE INDEX IF NOT EXISTS idx_news_scope ON news(scope)',
+      'CREATE INDEX IF NOT EXISTS idx_news_account_id ON news(account_id)',
+      'CREATE INDEX IF NOT EXISTS idx_news_disabled ON news(disabled)',
+      'CREATE INDEX IF NOT EXISTS idx_news_created_at ON news(created_at)'
     ];
 
     indexes.forEach(indexSQL => {
@@ -298,6 +317,65 @@ class DatabaseManager {
   deleteMission(missionId, accountId) {
     const stmt = this.db.prepare('DELETE FROM missions WHERE id = ? AND account_id = ?');
     return stmt.run(missionId, accountId);
+  }
+
+  /**
+   * News operations
+   *
+   * scope is either 'global' (account_id is NULL, visible to everyone) or
+   * 'account' (account_id is required, visible only to that account).
+   */
+
+  // Save (create or update) a news item
+  saveNews(newsId, scope, accountId, title, body, priority, authorId, expiresAt) {
+    const stmt = this.db.prepare(`
+      INSERT INTO news (id, scope, account_id, title, body, priority, author_id, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        scope = excluded.scope,
+        account_id = excluded.account_id,
+        title = excluded.title,
+        body = excluded.body,
+        priority = excluded.priority,
+        expires_at = excluded.expires_at,
+        updated_at = strftime('%s', 'now')
+    `);
+
+    return stmt.run(newsId, scope, accountId || null, title, body, priority || 0, authorId || null, expiresAt || null);
+  }
+
+  // Load active (non-disabled, non-expired) news visible to an account:
+  // global news + that account's own news.
+  loadNews(accountId) {
+    const stmt = this.db.prepare(`
+      SELECT * FROM news
+      WHERE disabled = 0
+        AND (expires_at IS NULL OR expires_at > strftime('%s', 'now'))
+        AND (scope = 'global' OR (scope = 'account' AND account_id = ?))
+      ORDER BY created_at DESC
+    `);
+
+    return stmt.all(accountId);
+  }
+
+  // Get a single news item by id
+  getNews(newsId) {
+    return this.db.prepare('SELECT * FROM news WHERE id = ?').get(newsId);
+  }
+
+  // Disable (soft-delete) a news item. Scoped by accountId unless it is global
+  // (global items are only writable by the admin dashboard, which passes null).
+  disableNews(newsId) {
+    const stmt = this.db.prepare(`
+      UPDATE news SET disabled = 1, updated_at = strftime('%s', 'now') WHERE id = ?
+    `);
+    return stmt.run(newsId);
+  }
+
+  // Hard-delete a news item
+  deleteNews(newsId) {
+    const stmt = this.db.prepare('DELETE FROM news WHERE id = ?');
+    return stmt.run(newsId);
   }
 
   /**
@@ -555,6 +633,30 @@ class DatabaseManager {
     return this.db.prepare('SELECT DISTINCT account_id FROM missions ORDER BY account_id ASC').all().map(r => r.account_id);
   }
 
+  // Paginated news list, optionally filtered by scope/account, for the admin dashboard
+  getNewsPage({ page = 1, limit = 50, scope = null, accountId = null, includeDisabled = true } = {}) {
+    const p = Math.max(1, page);
+    const l = Math.min(500, Math.max(1, limit));
+    const offset = (p - 1) * l;
+
+    let where = [];
+    let params = [];
+    if (scope) { where.push('scope = ?'); params.push(scope); }
+    if (accountId) { where.push('account_id = ?'); params.push(accountId); }
+    if (!includeDisabled) { where.push('disabled = 0'); }
+    const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+
+    const total = this.db.prepare('SELECT COUNT(*) as count FROM news' + whereClause).get(...params).count;
+    const rows = this.db.prepare('SELECT * FROM news' + whereClause + ' ORDER BY created_at DESC LIMIT ? OFFSET ?').all(...params, l, offset);
+
+    return { rows, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
+  }
+
+  // Distinct account_ids that have account-scoped news (for the news filter dropdown)
+  getNewsAccounts() {
+    return this.db.prepare("SELECT DISTINCT account_id FROM news WHERE scope = 'account' AND account_id IS NOT NULL ORDER BY account_id ASC").all().map(r => r.account_id);
+  }
+
   // Distinct unit_ids present anywhere (units table + tasks + missions + queue)
   getAllUnitIds() {
     const rows = this.db.prepare(`
@@ -586,6 +688,8 @@ class DatabaseManager {
       tasks: this.db.prepare('SELECT COUNT(*) as count FROM tasks').get().count,
       disabledTasks: this.db.prepare('SELECT COUNT(*) as count FROM tasks WHERE disabled = 1').get().count,
       missions: this.db.prepare('SELECT COUNT(*) as count FROM missions').get().count,
+      news: this.db.prepare('SELECT COUNT(*) as count FROM news').get().count,
+      activeNews: this.db.prepare("SELECT COUNT(*) as count FROM news WHERE disabled = 0 AND (expires_at IS NULL OR expires_at > strftime('%s', 'now'))").get().count,
       queuedMessages: this.db.prepare("SELECT COUNT(*) as count FROM offline_queue WHERE status = 'pending'").get().count,
       dbSize: fs.statSync(this.dbPath).size
     };

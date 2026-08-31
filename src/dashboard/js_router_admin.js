@@ -10,8 +10,11 @@
  *   - account lockout on repeated failures
  *   - read-only JSON API + EJS pages backed by DatabaseManager
  *
- * The dashboard is READ-ONLY: it never writes to the database.  All write
- * operations stay on the authenticated WebSocket S2S path.
+ * The dashboard is primarily READ-ONLY: write operations normally stay on the
+ * authenticated WebSocket S2S path. A small number of super-admin maintenance
+ * operations are a deliberate exception (access_log purge, News create/disable) —
+ * these are session-authenticated + CSRF-protected and, for News, immediately
+ * broadcast to connected comm servers so the change propagates live.
  */
 
 const express = require('express');
@@ -294,6 +297,15 @@ router.get('/missions', requireAuth, (req, res) => {
     });
 });
 
+// News page
+router.get('/news', requireAuth, (req, res) => {
+    res.render('admin/news', {
+        title: 'News',
+        adminUsername: req.session.adminUsername,
+        dashboardGuid: global.m_serverconfig.m_configuration.dashboard_url_guid || null
+    });
+});
+
 // Queue page
 router.get('/queue', requireAuth, (req, res) => {
     res.render('admin/queue', {
@@ -469,6 +481,100 @@ router.get('/api/missions/accounts', requireAuth, (req, res) => {
     } catch (error) {
         console.error('Error fetching accounts:', error);
         res.json({ error: 1, errorMessage: 'Failed to fetch accounts' });
+    }
+});
+
+// API: news — paginated, filterable by scope/account
+router.get('/api/news', requireAuth, (req, res) => {
+    try {
+        const db = getDb(req);
+        if (!db) return res.json({ error: 1, errorMessage: 'Database not available' });
+        const result = db.getNewsPage({
+            page: parseInt(req.query.page) || 1,
+            limit: parseInt(req.query.limit) || 50,
+            scope: req.query.scope || null,
+            accountId: req.query.accountId || null,
+            includeDisabled: req.query.includeDisabled !== 'false'
+        });
+        res.json({ error: 0, ...result });
+    } catch (error) {
+        console.error('Error fetching news:', error);
+        res.json({ error: 1, errorMessage: 'Failed to fetch news' });
+    }
+});
+
+// API: distinct account IDs that have account-scoped news (for filter dropdowns)
+router.get('/api/news/accounts', requireAuth, (req, res) => {
+    try {
+        const db = getDb(req);
+        if (!db) return res.json({ error: 1, errorMessage: 'Database not available' });
+        res.json({ error: 0, accounts: db.getNewsAccounts() });
+    } catch (error) {
+        console.error('Error fetching news accounts:', error);
+        res.json({ error: 1, errorMessage: 'Failed to fetch news accounts' });
+    }
+});
+
+// News writes (create/disable) are, like the access_log purge above, a deliberate
+// exception to the "dashboard is read-only" rule: they are super-admin-only,
+// session-authenticated + CSRF-protected maintenance operations. Every write is
+// immediately fanned out live to connected comm servers via wsServer.broadcast()
+// so GCS clients don't have to wait for their periodic resync.
+const CONST_TYPE_AndruavSystem_NewsPush = 9018;
+
+function broadcastNewsPush(req, newsPayload) {
+    const wsServer = req.app.locals.wsServer;
+    if (!wsServer) return;
+    wsServer.broadcast({ mt: CONST_TYPE_AndruavSystem_NewsPush, ms: { news: newsPayload }, success: true, timestamp: Date.now() });
+}
+
+// API: create/update a news item (super-admin only, scope can be 'global' or 'account')
+router.post('/api/news', requireAuth, (req, res) => {
+    try {
+        const db = getDb(req);
+        if (!db) return res.json({ error: 1, errorMessage: 'Database not available' });
+
+        const { scope, accountId, title, body, priority, expiresAt } = req.body;
+        if (scope !== 'global' && scope !== 'account') {
+            return res.json({ error: 1, errorMessage: "scope must be 'global' or 'account'" });
+        }
+        if (scope === 'account' && !accountId) {
+            return res.json({ error: 1, errorMessage: 'accountId is required for scope=account' });
+        }
+        if (!body) {
+            return res.json({ error: 1, errorMessage: 'body is required' });
+        }
+
+        const newsId = req.body.newsId || require('crypto').randomUUID();
+        db.saveNews(newsId, scope, scope === 'global' ? null : accountId, title || null, body, parseInt(priority) || 0, req.session.adminUsername, expiresAt || null);
+        const savedNews = db.getNews(newsId);
+
+        console.log(`[dashboard] news ${newsId} saved by ${req.session.adminUsername} (scope=${scope})`);
+        broadcastNewsPush(req, savedNews);
+
+        res.json({ error: 0, newsId: newsId });
+    } catch (error) {
+        console.error('Error saving news:', error);
+        res.json({ error: 1, errorMessage: 'Failed to save news' });
+    }
+});
+
+// API: disable (soft-delete) a news item
+router.delete('/api/news/:id', requireAuth, (req, res) => {
+    try {
+        const db = getDb(req);
+        if (!db) return res.json({ error: 1, errorMessage: 'Database not available' });
+
+        const newsId = req.params.id;
+        const result = db.disableNews(newsId);
+
+        console.log(`[dashboard] news ${newsId} disabled by ${req.session.adminUsername}`);
+        broadcastNewsPush(req, { id: newsId, disabled: 1 });
+
+        res.json({ error: 0, disabled: result.changes });
+    } catch (error) {
+        console.error('Error disabling news:', error);
+        res.json({ error: 1, errorMessage: 'Failed to disable news' });
     }
 });
 

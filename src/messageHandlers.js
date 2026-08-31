@@ -10,6 +10,10 @@ const CONST_TYPE_AndruavSystem_UnitOnline = 9009; // Custom message for unit onl
 const CONST_TYPE_AndruavSystem_LoadMission = 9010; // Load mission from storage
 const CONST_TYPE_AndruavSystem_SaveMission = 9011; // Save mission to storage
 const CONST_TYPE_AndruavSystem_DeleteMission = 9012; // Delete mission from storage
+const CONST_TYPE_AndruavSystem_LoadNews = 9015; // Load news (account + global) from storage
+const CONST_TYPE_AndruavSystem_SaveNews = 9016; // Save news to storage
+const CONST_TYPE_AndruavSystem_DeleteNews = 9017; // Delete/disable news from storage
+const CONST_TYPE_AndruavSystem_NewsPush = 9018; // Unsolicited push: storage -> comm servers
 
 class MessageHandlers {
   constructor(db, wsServer) {
@@ -338,6 +342,103 @@ class MessageHandlers {
   }
 
   /**
+   * Handle LoadNews message (9015)
+   * Returns active (non-disabled, non-expired) global news + the caller's account news.
+   */
+  async handleLoadNews(connectionId, message) {
+    const payload = this.getPayload(message);
+    const { accountId } = payload;
+
+    try {
+      logger.info(`LoadNews request for account ${accountId}`);
+
+      const news = this.db.loadNews(accountId);
+
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_LoadNews, {
+        s: 'OK',
+        news: news
+      }, true));
+
+      logger.info(`Loaded ${news.length} news items for account ${accountId}`);
+    } catch (error) {
+      logger.error(`Error loading news for account ${accountId}: ${error.message}`);
+
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_LoadNews, {
+        s: 'ERROR:' + error.message
+      }, false, error.message));
+    }
+  }
+
+  /**
+   * Handle SaveNews message (9016)
+   */
+  async handleSaveNews(connectionId, message) {
+    const payload = this.getPayload(message);
+    const { newsId, scope, accountId, title, body, priority, authorId, expiresAt } = payload;
+
+    try {
+      const id = newsId || require('crypto').randomUUID();
+      logger.info(`SaveNews request ${id} (scope=${scope}, account=${accountId || 'null'})`);
+
+      this.db.saveNews(id, scope, accountId, title, body, priority, authorId, expiresAt);
+      const savedNews = this.db.getNews(id);
+
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveNews, {
+        s: 'OK:save',
+        newsId: id
+      }, true));
+
+      // Fan out the change to every connected comm server so it can be pushed
+      // to GCS clients in real time (in addition to their periodic resync).
+      this.wsServer.broadcast(this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_NewsPush, {
+        news: savedNews
+      }, true));
+
+      logger.info(`Saved news ${id}`);
+    } catch (error) {
+      logger.error(`Error saving news: ${error.message}`);
+
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveNews, {
+        s: 'ERROR:' + error.message
+      }, false, error.message));
+    }
+  }
+
+  /**
+   * Handle DeleteNews message (9017) - soft-delete (disable) by default
+   */
+  async handleDeleteNews(connectionId, message) {
+    const payload = this.getPayload(message);
+    const { newsId } = payload;
+
+    try {
+      logger.info(`DeleteNews request for news ${newsId}`);
+
+      const result = this.db.disableNews(newsId);
+
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_DeleteNews, {
+        s: 'OK:delete',
+        newsId: newsId,
+        deleted: result.changes
+      }, true));
+
+      // Notify connected comm servers so they can remove/hide the item live.
+      this.wsServer.broadcast(this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_NewsPush, {
+        news: { id: newsId, disabled: 1 }
+      }, true));
+
+      logger.info(`Disabled news ${newsId} (changes: ${result.changes})`);
+    } catch (error) {
+      logger.error(`Error deleting news ${newsId}: ${error.message}`);
+
+      this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_DeleteNews, {
+        s: 'ERROR:' + error.message,
+        newsId: newsId
+      }, false, error.message));
+    }
+  }
+
+  /**
    * Handle message by numeric type (mt field)
    */
   async handleMessageByType(connectionId, message) {
@@ -368,6 +469,15 @@ class MessageHandlers {
       case CONST_TYPE_AndruavSystem_DeleteMission:
         await this.handleDeleteMission(connectionId, message);
         break;
+      case CONST_TYPE_AndruavSystem_LoadNews:
+        await this.handleLoadNews(connectionId, message);
+        break;
+      case CONST_TYPE_AndruavSystem_SaveNews:
+        await this.handleSaveNews(connectionId, message);
+        break;
+      case CONST_TYPE_AndruavSystem_DeleteNews:
+        await this.handleDeleteNews(connectionId, message);
+        break;
       default:
         logger.warn(`Unknown message type: ${messageType}`);
         this.wsServer.sendError(connectionId, `Unknown message type: ${messageType}`);
@@ -386,7 +496,10 @@ class MessageHandlers {
       [CONST_TYPE_AndruavSystem_UnitOnline]: this.handleUnitOnline.bind(this),
       [CONST_TYPE_AndruavSystem_LoadMission]: this.handleLoadMission.bind(this),
       [CONST_TYPE_AndruavSystem_SaveMission]: this.handleSaveMission.bind(this),
-      [CONST_TYPE_AndruavSystem_DeleteMission]: this.handleDeleteMission.bind(this)
+      [CONST_TYPE_AndruavSystem_DeleteMission]: this.handleDeleteMission.bind(this),
+      [CONST_TYPE_AndruavSystem_LoadNews]: this.handleLoadNews.bind(this),
+      [CONST_TYPE_AndruavSystem_SaveNews]: this.handleSaveNews.bind(this),
+      [CONST_TYPE_AndruavSystem_DeleteNews]: this.handleDeleteNews.bind(this)
     };
   }
 }
