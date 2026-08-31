@@ -24,9 +24,9 @@ const csrf = require('csurf');
 const helmet = require('helmet');
 const bcrypt = require('bcryptjs');
 
-const { isValidAdminUsername, isValidAdminPassword } = require('./hlp_validation');
+const { isValidAdminUsername, isValidAdminPassword } = require('droneengage_server_common').helpers.validation;
 const { sessionMiddleware } = require('./js_admin_session');
-const { isBcryptHash, handleConfig } = require('./js_config_handler');
+const { isBcryptHash, handleConfig } = require('droneengage_server_common').configHandler;
 
 // Process $$HASH$$ directives in the config (admin_password) once at load.
 // global.m_serverconfig.m_configuration is already parsed by server.js.

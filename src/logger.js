@@ -1,4 +1,4 @@
-const { Colors } = require('../helpers/js_colors.js');
+const { Colors } = require('droneengage_server_common').helpers.colors;
 
 class Logger {
   constructor() {

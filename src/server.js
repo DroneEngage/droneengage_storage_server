@@ -1,7 +1,7 @@
 "use strict";
 
 const v_pjson           = require('../package.json');
-global.Colors           = require ("../helpers/js_colors.js").Colors;
+global.Colors           = require ("droneengage_server_common").helpers.colors.Colors;
 global.m_serverconfig   = require ('../js_serverConfig.js');
 
 let v_configFileName = global.m_serverconfig.getFileName();
@@ -91,7 +91,7 @@ function fn_displayInfo ()
 
 function fn_parseArgs()
 {
-    const c_args = require ('../helpers/hlp_args.js');
+    const c_args = require ('droneengage_server_common').helpers.args;
 
     var cmds = c_args.getArgs();
     if (cmds.hasOwnProperty('h') || cmds.hasOwnProperty('help'))
