@@ -13,6 +13,8 @@ data/
 
 # Config (if it contains sensitive data)
 # config/local.json
+# Local config override (merged on top of server.config at runtime)
+server.config.local
 
 # Environment
 .env
