@@ -17,5 +17,10 @@ const path = require("path");
 
 module.exports = common.create({
     configDir: __dirname,
-    enableHashHandling: false   // dashboard loads $$HASH$$ lazily via js_router_admin
+    enableHashHandling: false,   // dashboard loads $$HASH$$ lazily via js_router_admin
+    envOverrides: {
+        'de_storage_debug_logging': (cfg, val) => {
+            cfg.debug_logging = (val === 'true' || val === '1');
+        }
+    }
 });
