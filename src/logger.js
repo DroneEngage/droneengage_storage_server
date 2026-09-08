@@ -31,7 +31,11 @@ class Logger {
     if (this.useGlobal && global.m_logger) {
       global.m_logger.Debug(message);
     }
-    console.log(Colors.FgCyan + '[DEBUG] ' + Colors.Reset + message);
+    // Verbose debug output is gated behind the debug_logging config flag to
+    // avoid console log spam (logger.debug fires on every incoming WS message).
+    if (global.DEBUG_LOGGING) {
+      console.log(Colors.FgCyan + '[DEBUG] ' + Colors.Reset + message);
+    }
   }
 }
 
