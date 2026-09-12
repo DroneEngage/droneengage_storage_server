@@ -427,7 +427,11 @@ class DatabaseManager {
     `);
     
     const result = stmt.run();
-    logger.info(`Cleaned up ${result.changes} delivered queue messages`);
+    if (result.changes > 0) {
+      logger.info(`Cleaned up ${result.changes} delivered queue messages`);
+    } else {
+      logger.debug(`Cleaned up ${result.changes} delivered queue messages`);
+    }
     return result;
   }
 
