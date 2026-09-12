@@ -48,7 +48,7 @@ class MessageHandlers {
     const connection = this.wsServer.getConnection(connectionId);
 
     try {
-      logger.info(`LoadTasks request for unit ${unitId} from comm server ${connection.commServerId}`);
+      logger.debug(`LoadTasks request for unit ${unitId} from comm server ${connection.commServerId}`);
 
       // Get tasks from database
       const tasks = this.db.loadTasks(unitId);
@@ -63,7 +63,7 @@ class MessageHandlers {
         unitId: unitId
       }, true));
 
-      logger.info(`Loaded ${tasks.length} tasks for unit ${unitId}`);
+      logger.debug(`Loaded ${tasks.length} tasks for unit ${unitId}`);
     } catch (error) {
       logger.error(`Error loading tasks for unit ${unitId}: ${error.message}`);
       
@@ -350,7 +350,7 @@ class MessageHandlers {
     const { accountId } = payload;
 
     try {
-      logger.info(`LoadNews request for account ${accountId}`);
+      logger.debug(`LoadNews request for account ${accountId}`);
 
       const news = this.db.loadNews(accountId);
 
@@ -359,7 +359,7 @@ class MessageHandlers {
         news: news
       }, true));
 
-      logger.info(`Loaded ${news.length} news items for account ${accountId}`);
+      logger.debug(`Loaded ${news.length} news items for account ${accountId}`);
     } catch (error) {
       logger.error(`Error loading news for account ${accountId}: ${error.message}`);
 
