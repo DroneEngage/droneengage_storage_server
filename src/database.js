@@ -319,6 +319,12 @@ class DatabaseManager {
     return stmt.run(missionId, accountId);
   }
 
+  // Delete a mission by id only - admin dashboard use, not account-scoped
+  deleteMissionById(missionId) {
+    const stmt = this.db.prepare('DELETE FROM missions WHERE id = ?');
+    return stmt.run(missionId);
+  }
+
   /**
    * News operations
    *
@@ -368,6 +374,14 @@ class DatabaseManager {
   disableNews(newsId) {
     const stmt = this.db.prepare(`
       UPDATE news SET disabled = 1, updated_at = strftime('%s', 'now') WHERE id = ?
+    `);
+    return stmt.run(newsId);
+  }
+
+  // Re-enable a previously disabled news item
+  enableNews(newsId) {
+    const stmt = this.db.prepare(`
+      UPDATE news SET disabled = 0, updated_at = strftime('%s', 'now') WHERE id = ?
     `);
     return stmt.run(newsId);
   }
