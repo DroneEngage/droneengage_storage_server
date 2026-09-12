@@ -80,7 +80,10 @@
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small text-muted">Expires (optional)</label>
-                        <input type="datetime-local" class="form-control form-control-sm" id="newExpiresAt">
+                        <div class="d-flex gap-1">
+                            <input type="date" class="form-control form-control-sm" id="newExpiresDate">
+                            <input type="time" class="form-control form-control-sm" id="newExpiresTime" step="1">
+                        </div>
                     </div>
                 </div>
                 <div class="row g-2 mt-2">
@@ -211,8 +214,15 @@
             const priority = document.getElementById('newPriority').value;
             const title = document.getElementById('newTitle').value.trim();
             const body = document.getElementById('newBody').value.trim();
-            const expiresLocal = document.getElementById('newExpiresAt').value;
-            const expiresAt = expiresLocal ? Math.floor(new Date(expiresLocal).getTime() / 1000) : null;
+            const expiresDate = document.getElementById('newExpiresDate').value;
+            const expiresTime = document.getElementById('newExpiresTime').value;
+            // date picked without a time means "end of that day"
+            let expiresAt = null;
+            if (expiresDate) {
+                const t = new Date(expiresDate + 'T' + (expiresTime || '23:59:59')).getTime();
+                if (!Number.isFinite(t)) { alert('Invalid expiry date: ' + expiresDate); return; }
+                expiresAt = Math.floor(t / 1000);
+            }
 
             if (!body) { alert('Body is required'); return; }
             if (scope === 'account' && !accountId) { alert('Target Account ID is required for account scope'); return; }
@@ -228,7 +238,8 @@
 
                 document.getElementById('newTitle').value = '';
                 document.getElementById('newBody').value = '';
-                document.getElementById('newExpiresAt').value = '';
+                document.getElementById('newExpiresDate').value = '';
+                document.getElementById('newExpiresTime').value = '';
                 loadNews(1);
             } catch (e) {
                 console.error('Error posting news:', e);
@@ -284,7 +295,9 @@
             document.getElementById('newAccountId').value = n.account_id || '';
             document.getElementById('newPriority').value = String(n.priority || 0);
             document.getElementById('newTitle').value = n.title || '';
-            document.getElementById('newExpiresAt').value = toLocalInputValue(n.expires_at);
+            const expVal = toLocalInputValue(n.expires_at);
+            document.getElementById('newExpiresDate').value = expVal ? expVal.slice(0, 10) : '';
+            document.getElementById('newExpiresTime').value = expVal ? expVal.slice(11) : '';
             document.getElementById('newBody').value = n.body || '';
             window.scrollTo({ top: 0, behavior: 'smooth' });
             document.getElementById('newBody').focus();

@@ -567,7 +567,7 @@ router.post('/api/news', requireAuth, (req, res) => {
         db.saveNews(newsId, scope, scope === 'global' ? null : accountId, title || null, body, parseInt(priority) || 0, req.session.adminUsername, expiresAt || null);
         const savedNews = db.getNews(newsId);
 
-        console.log(`[dashboard] news ${newsId} saved by ${req.session.adminUsername} (scope=${scope})`);
+        console.log(`[dashboard] news ${newsId} saved by ${req.session.adminUsername} (scope=${scope}, expiresAt=${expiresAt})`);
         broadcastNewsPush(req, savedNews);
 
         res.json({ error: 0, newsId: newsId });
