@@ -442,6 +442,24 @@ router.get('/api/missions', requireAuth, (req, res) => {
     }
 });
 
+// API: delete a mission (super-admin only, not account-scoped)
+router.delete('/api/missions/:id', requireAuth, (req, res) => {
+    try {
+        const db = getDb(req);
+        if (!db) return res.json({ error: 1, errorMessage: 'Database not available' });
+
+        const missionId = req.params.id;
+        const result = db.deleteMissionById(missionId);
+
+        console.log(`[dashboard] mission ${missionId} deleted by ${req.session.adminUsername}`);
+
+        res.json({ error: 0, deleted: result.changes });
+    } catch (error) {
+        console.error('Error deleting mission:', error);
+        res.json({ error: 1, errorMessage: 'Failed to delete mission' });
+    }
+});
+
 // API: offline queue — paginated, filterable by unit/status
 router.get('/api/queue', requireAuth, (req, res) => {
     try {
@@ -559,19 +577,48 @@ router.post('/api/news', requireAuth, (req, res) => {
     }
 });
 
-// API: disable (soft-delete) a news item
+// API: re-enable a disabled news item
+router.post('/api/news/:id/enable', requireAuth, (req, res) => {
+    try {
+        const db = getDb(req);
+        if (!db) return res.json({ error: 1, errorMessage: 'Database not available' });
+
+        const newsId = req.params.id;
+        const result = db.enableNews(newsId);
+        const savedNews = db.getNews(newsId);
+
+        console.log(`[dashboard] news ${newsId} enabled by ${req.session.adminUsername}`);
+        if (savedNews) broadcastNewsPush(req, savedNews);
+
+        res.json({ error: 0, enabled: result.changes });
+    } catch (error) {
+        console.error('Error enabling news:', error);
+        res.json({ error: 1, errorMessage: 'Failed to enable news' });
+    }
+});
+
+// API: disable (soft-delete) a news item; ?permanent=true hard-deletes it
 router.delete('/api/news/:id', requireAuth, (req, res) => {
     try {
         const db = getDb(req);
         if (!db) return res.json({ error: 1, errorMessage: 'Database not available' });
 
         const newsId = req.params.id;
-        const result = db.disableNews(newsId);
+        const permanent = req.query.permanent === 'true' || req.query.permanent === '1';
+        const existing = db.getNews(newsId);
+        const result = permanent ? db.deleteNews(newsId) : db.disableNews(newsId);
 
-        console.log(`[dashboard] news ${newsId} disabled by ${req.session.adminUsername}`);
-        broadcastNewsPush(req, { id: newsId, disabled: 1 });
+        console.log(`[dashboard] news ${newsId} ${permanent ? 'deleted' : 'disabled'} by ${req.session.adminUsername}`);
+        // GCS clients remove an item when they receive {id, disabled:1}; scope and
+        // account_id are included (when known) so comm servers can target the push.
+        broadcastNewsPush(req, {
+            id: newsId,
+            scope: existing ? existing.scope : null,
+            account_id: existing ? existing.account_id : null,
+            disabled: 1
+        });
 
-        res.json({ error: 0, disabled: result.changes });
+        res.json({ error: 0, disabled: result.changes, permanent: permanent });
     } catch (error) {
         console.error('Error disabling news:', error);
         res.json({ error: 1, errorMessage: 'Failed to disable news' });
