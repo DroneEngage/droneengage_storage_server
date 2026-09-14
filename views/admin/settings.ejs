@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link href="/public/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #212529; color: #f8f9fa; }
+        .navbar-custom { background: #343a40; }
+        .navbar-custom .navbar-brand,
+        .navbar-custom .nav-link { color: #f8f9fa !important; }
+        .card { background: #2c3034; border: 1px solid #495057; }
+        .card-header { background: #2c3034; border-bottom: 1px solid #495057; color: #f8f9fa; }
+        .text-muted { color: #adb5bd !important; }
+        .btn-primary { background: #0d6efd; border: none; }
+        .btn-primary:hover { background: #0b5ed7; }
+        .btn-outline-light { border-color: #f8f9fa; color: #f8f9fa; }
+        .btn-outline-light:hover { background: #f8f9fa; color: #212529; }
+        .form-control, .form-select {
+            background: #2c3034; border: 1px solid #495057; color: #f8f9fa;
+        }
+        .form-control:focus, .form-select:focus {
+            background: #2c3034; border-color: #86b7fe; color: #f8f9fa;
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+        }
+    </style>
+</head>
+<body>
+    <%- include('../common/navbar', { activePage: 'settings', navbarFixed: false, dashboardGuid: dashboardGuid, adminUsername: adminUsername }) %>
+
+    <div class="container mt-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Quota Limits</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">
+                    Per-account quotas prevent a single account (or compromised GCS) from
+                    flooding the <code>news</code> and <code>missions</code> tables.
+                    Set a value to <strong>0</strong> to disable a limit (unbounded).
+                    Changes take effect immediately and are persisted to
+                    <code>server.config.local</code> so they survive a restart.
+                </p>
+
+                <div id="alertBox" class="alert d-none" role="alert"></div>
+
+                <form id="settingsForm" onsubmit="saveSettings(event)">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Max News per Account</label>
+                            <input type="number" class="form-control" id="max_news_per_account" min="0" step="1" placeholder="0 = unbounded">
+                            <small class="text-muted">Account-scoped news inserts rejected above this count. Global news is exempt.</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Max Missions per Account</label>
+                            <input type="number" class="form-control" id="max_missions_per_account" min="0" step="1" placeholder="0 = unbounded">
+                            <small class="text-muted">Total missions an account can own across all units.</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Max Missions per Unit</label>
+                            <input type="number" class="form-control" id="max_missions_per_unit" min="0" step="1" placeholder="0 = unbounded">
+                            <small class="text-muted">Missions an account can own for a single unit.</small>
+                        </div>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-3">
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                        <button type="button" class="btn btn-outline-light" onclick="loadSettings()">Reset</button>
+                        <span class="text-muted small" id="persistStatus"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">How It Works</h5>
+            </div>
+            <div class="card-body">
+                <ul class="mb-0">
+                    <li><strong>Updates are never blocked.</strong> The quota check only runs for <em>new</em> inserts. Editing an existing news item or mission always succeeds regardless of quota.</li>
+                    <li><strong>Disabled news frees quota.</strong> Soft-deleted (disabled) news is not counted against the limit.</li>
+                    <li><strong>Global news is unbounded.</strong> Global news is admin-dashboard-only and not counted against any account quota.</li>
+                    <li><strong>0 = unbounded.</strong> Setting any limit to 0 disables that check entirely (backwards-compatible with deployments that have no <code>limits</code> block).</li>
+                    <li><strong>Persistence.</strong> Values are written to <code>server.config.local</code> (git-ignored), which is merged on top of <code>server.config</code> at startup. Environment variables (<code>de_storage_max_*</code>) override both at startup if set.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script src="/public/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function showAlert(type, msg) {
+            const box = document.getElementById('alertBox');
+            box.className = 'alert alert-' + type;
+            box.textContent = msg;
+            box.classList.remove('d-none');
+        }
+
+        function hideAlert() {
+            document.getElementById('alertBox').classList.add('d-none');
+        }
+
+        async function loadSettings() {
+            hideAlert();
+            try {
+                const res = await fetch('/admin/api/settings');
+                const data = await res.json();
+                if (data.error) { showAlert('danger', data.errorMessage); return; }
+                document.getElementById('max_news_per_account').value = data.limits.max_news_per_account;
+                document.getElementById('max_missions_per_account').value = data.limits.max_missions_per_account;
+                document.getElementById('max_missions_per_unit').value = data.limits.max_missions_per_unit;
+                document.getElementById('persistStatus').textContent =
+                    data.persisted ? '(persisted to server.config.local)' : '(defaults from server.config)';
+            } catch (e) {
+                console.error('Error loading settings:', e);
+                showAlert('danger', 'Failed to load settings');
+            }
+        }
+
+        async function saveSettings(event) {
+            event.preventDefault();
+            hideAlert();
+            const limits = {
+                max_news_per_account: document.getElementById('max_news_per_account').value,
+                max_missions_per_account: document.getElementById('max_missions_per_account').value,
+                max_missions_per_unit: document.getElementById('max_missions_per_unit').value
+            };
+            try {
+                const res = await fetch('/admin/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(limits)
+                });
+                const data = await res.json();
+                if (data.error) { showAlert('danger', data.errorMessage); return; }
+                document.getElementById('max_news_per_account').value = data.limits.max_news_per_account;
+                document.getElementById('max_missions_per_account').value = data.limits.max_missions_per_account;
+                document.getElementById('max_missions_per_unit').value = data.limits.max_missions_per_unit;
+                document.getElementById('persistStatus').textContent = '(persisted to server.config.local)';
+                showAlert('success', 'Quota limits saved and applied immediately.');
+            } catch (e) {
+                console.error('Error saving settings:', e);
+                showAlert('danger', 'Failed to save settings');
+            }
+        }
+
+        loadSettings();
+    </script>
+</body>
+</html>

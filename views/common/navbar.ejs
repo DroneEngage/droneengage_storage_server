@@ -16,7 +16,8 @@ const brandMap = {
     'tasks':     { text: 'Tasks',             link: '/tasks'     },
     'missions':  { text: 'Missions',          link: '/missions'  },
     'news':      { text: 'News',              link: '/news'      },
-    'queue':     { text: 'Offline Queue',     link: '/queue'     }
+    'queue':     { text: 'Offline Queue',     link: '/queue'     },
+    'settings':  { text: 'Settings',          link: '/settings'  }
 };
 const brand = brandMap[activePage] || brandMap['dashboard'];
 const navClass = navbarFixed
@@ -51,6 +52,9 @@ const navClass = navbarFixed
                 </li>
                 <li class="nav-item">
                     <a class="nav-link<%= activePage === 'queue' ? ' active' : '' %>" href="/admin<%= guidPrefix %>/queue">Queue</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link<%= activePage === 'settings' ? ' active' : '' %>" href="/admin<%= guidPrefix %>/settings">Settings</a>
                 </li>
             </ul>
             <% if (adminUsername) { %>
