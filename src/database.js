@@ -393,6 +393,40 @@ class DatabaseManager {
   }
 
   /**
+   * Quota helpers — scoped COUNT(*) queries used by the SaveNews/SaveMission
+   * guards in messageHandlers.  All hit existing indexes (idx_news_account_id,
+   * idx_missions_account_id, idx_missions_unit_id) so they are cheap.
+   *
+   * Global news (account_id IS NULL) is NOT counted against any account quota
+   * — it is admin-dashboard-only and not user-writable.
+   */
+
+  // Count active (non-disabled) account-scoped news for an account.
+  countNewsByAccount(accountId) {
+    const stmt = this.db.prepare(
+      `SELECT COUNT(*) AS n FROM news
+       WHERE scope = 'account' AND account_id = ? AND disabled = 0`
+    );
+    return stmt.get(accountId).n;
+  }
+
+  // Count missions owned by an account (all units).
+  countMissionsByAccount(accountId) {
+    const stmt = this.db.prepare(
+      `SELECT COUNT(*) AS n FROM missions WHERE account_id = ?`
+    );
+    return stmt.get(accountId).n;
+  }
+
+  // Count missions owned by an account for a specific unit.
+  countMissionsByUnit(unitId, accountId) {
+    const stmt = this.db.prepare(
+      `SELECT COUNT(*) AS n FROM missions WHERE unit_id = ? AND account_id = ?`
+    );
+    return stmt.get(unitId, accountId).n;
+  }
+
+  /**
    * Offline queue operations
    */
 

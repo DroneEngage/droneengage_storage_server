@@ -1,5 +1,6 @@
 const logger = require('./logger');
 const database = require('./database');
+const serverConfig = require('../js_serverConfig.js');
 
 // Message type constants (matching AndruavMessageTypes)
 const CONST_TYPE_AndruavSystem_LoadTasks = 9001;
@@ -287,6 +288,36 @@ class MessageHandlers {
       // Ensure unit exists
       this.db.upsertUnit(unitId, null, connection.commServerId);
 
+      // Per-account / per-unit quota: only gate NEW inserts, not updates of
+      // an existing mission (preserves ON CONFLICT(id) DO UPDATE semantics).
+      const existing = this.db.getMission(missionId, accountId);
+      if (!existing) {
+        const limits = serverConfig.m_configuration.limits || {};
+        const perAccount = limits.max_missions_per_account ?? 0;
+        const perUnit = limits.max_missions_per_unit ?? 0;
+
+        if (perAccount > 0 && this.db.countMissionsByAccount(accountId) >= perAccount) {
+          const count = this.db.countMissionsByAccount(accountId);
+          logger.warn(`SaveMission rejected: account ${accountId} at ${count}/${perAccount}`);
+          this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
+            s: `ERROR:mission quota exceeded (${count}/${perAccount} per account)`,
+            missionId: missionId,
+            unitId: unitId
+          }, false, 'mission quota exceeded'));
+          return;
+        }
+        if (perUnit > 0 && this.db.countMissionsByUnit(unitId, accountId) >= perUnit) {
+          const count = this.db.countMissionsByUnit(unitId, accountId);
+          logger.warn(`SaveMission rejected: account ${accountId} unit ${unitId} at ${count}/${perUnit}`);
+          this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
+            s: `ERROR:mission quota exceeded (${count}/${perUnit} per unit)`,
+            missionId: missionId,
+            unitId: unitId
+          }, false, 'mission quota exceeded'));
+          return;
+        }
+      }
+
       // Save mission
       this.db.saveMission(missionId, unitId, accountId, name, data);
 
@@ -379,6 +410,25 @@ class MessageHandlers {
     try {
       const id = newsId || require('crypto').randomUUID();
       logger.info(`SaveNews request ${id} (scope=${scope}, account=${accountId || 'null'})`);
+
+      // Per-account quota: only gate NEW account-scoped inserts, not updates
+      // of an existing newsId (preserves ON CONFLICT(id) DO UPDATE semantics).
+      // Global news (scope='global', admin-dashboard-only) is exempt.
+      const existing = this.db.getNews(id);
+      if (!existing && scope === 'account' && accountId) {
+        const limit = serverConfig.m_configuration.limits?.max_news_per_account ?? 0;
+        if (limit > 0) {
+          const count = this.db.countNewsByAccount(accountId);
+          if (count >= limit) {
+            logger.warn(`SaveNews rejected: account ${accountId} at ${count}/${limit}`);
+            this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveNews, {
+              s: `ERROR:news quota exceeded (${count}/${limit})`,
+              newsId: id
+            }, false, 'news quota exceeded'));
+            return;
+          }
+        }
+      }
 
       this.db.saveNews(id, scope, accountId, title, body, priority, authorId, expiresAt);
       const savedNews = this.db.getNews(id);

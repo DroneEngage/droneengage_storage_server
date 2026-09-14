@@ -21,6 +21,17 @@ module.exports = common.create({
     envOverrides: {
         'de_storage_debug_logging': (cfg, val) => {
             cfg.debug_logging = (val === 'true' || val === '1');
+        },
+        // Per-account quota knobs (see server.config "limits" block).
+        // Setting the env var overrides the file value; absent → file value wins.
+        'de_storage_max_news_per_account': (cfg, val) => {
+            if (val) { cfg.limits = cfg.limits || {}; cfg.limits.max_news_per_account = parseInt(val); }
+        },
+        'de_storage_max_missions_per_account': (cfg, val) => {
+            if (val) { cfg.limits = cfg.limits || {}; cfg.limits.max_missions_per_account = parseInt(val); }
+        },
+        'de_storage_max_missions_per_unit': (cfg, val) => {
+            if (val) { cfg.limits = cfg.limits || {}; cfg.limits.max_missions_per_unit = parseInt(val); }
         }
     }
 });
