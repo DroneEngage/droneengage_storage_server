@@ -32,6 +32,9 @@ module.exports = common.create({
         },
         'de_storage_max_missions_per_unit': (cfg, val) => {
             if (val) { cfg.limits = cfg.limits || {}; cfg.limits.max_missions_per_unit = parseInt(val); }
+        },
+        'de_storage_max_mission_bytes': (cfg, val) => {
+            if (val) { cfg.limits = cfg.limits || {}; cfg.limits.max_mission_bytes = parseInt(val); }
         }
     }
 });

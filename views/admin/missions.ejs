@@ -58,10 +58,20 @@
                             <option value="">All units</option>
                         </select>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <label class="form-label small text-muted">Account ID</label>
                         <select class="form-select form-select-sm" id="filterAccount">
                             <option value="">All accounts</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">Kind</label>
+                        <select class="form-select form-select-sm" id="filterKind">
+                            <option value="">All kinds</option>
+                            <option value="de_plan">de_plan</option>
+                            <option value="de_operation">de_operation</option>
+                            <option value="de_package">de_package</option>
+                            <option value="de_journal">de_journal</option>
                         </select>
                     </div>
                     <div class="col-md-2 d-flex align-items-end">
@@ -76,15 +86,17 @@
                                 <th>ID</th>
                                 <th>Unit</th>
                                 <th>Account</th>
+                                <th>Kind</th>
                                 <th>Name</th>
                                 <th>Version</th>
+                                <th>Size</th>
                                 <th>Updated</th>
                                 <th>Data</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody id="missionsBody">
-                            <tr><td colspan="8" class="text-center text-muted">Loading...</td></tr>
+                            <tr><td colspan="10" class="text-center text-muted">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -158,9 +170,11 @@
             if (page) m_page = page;
             const unit = document.getElementById('filterUnit').value;
             const account = document.getElementById('filterAccount').value;
+            const kind = document.getElementById('filterKind').value;
             const params = new URLSearchParams({ page: m_page, limit: m_limit });
             if (unit) params.set('unitId', unit);
             if (account) params.set('accountId', account);
+            if (kind) params.set('kind', kind);
 
             try {
                 const res = await fetch('/admin/api/missions?' + params.toString());
@@ -169,15 +183,17 @@
 
                 const body = document.getElementById('missionsBody');
                 if (!data.rows || data.rows.length === 0) {
-                    body.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No missions found</td></tr>';
+                    body.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No missions found</td></tr>';
                 } else {
                     body.innerHTML = data.rows.map((m, i) => `
                         <tr>
                             <td class="small">${escapeHtml(m.id)}</td>
                             <td class="small ${unitClass(m.unit_id)}">${escapeHtml(m.unit_id)}</td>
                             <td class="small">${escapeHtml(m.account_id)}</td>
+                            <td class="small"><span class="badge bg-secondary">${escapeHtml(m.kind || 'de_plan')}</span></td>
                             <td class="small">${escapeHtml(m.name || '-')}</td>
                             <td>${escapeHtml(m.version ?? 1)}</td>
+                            <td class="small">${escapeHtml(m.size ?? '-')}</td>
                             <td class="small">${escapeHtml(fmtTime(m.updated_at))}</td>
                             <td><button class="btn btn-outline-light btn-sm" onclick="toggleData(${i})">show</button></td>
                             <td class="text-nowrap">
@@ -185,7 +201,7 @@
                             </td>
                         </tr>
                         <tr id="dataRow${i}" style="display:none;">
-                            <td colspan="8"><pre class="json-pre">${escapeHtml(JSON.stringify(m.data, null, 2))}</pre></td>
+                            <td colspan="10"><pre class="json-pre">${escapeHtml(JSON.stringify(m.data, null, 2))}</pre></td>
                         </tr>
                     `).join('');
                 }

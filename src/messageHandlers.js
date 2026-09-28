@@ -16,6 +16,15 @@ const CONST_TYPE_AndruavSystem_SaveNews = 9016; // Save news to storage
 const CONST_TYPE_AndruavSystem_DeleteNews = 9017; // Delete/disable news from storage
 const CONST_TYPE_AndruavSystem_NewsPush = 9018; // Unsolicited push: storage -> comm servers
 
+// Allowed mission kinds (P1F-01): v1 plans, v2 operations, compiled packages
+// (reserved for P4A-09) and flight journals (reserved for Phase 6).
+const MISSION_KINDS = new Set(['de_plan', 'de_operation', 'de_package', 'de_journal']);
+// meta is a small JSON descriptor stored beside the mission (2 KB cap).
+const CONST_MISSION_META_MAX_BYTES = 2048;
+// Default cap on the serialized `data` column when limits.max_mission_bytes
+// is absent from server.config.
+const CONST_MISSION_DATA_MAX_BYTES_DEFAULT = 1024 * 1024;
+
 class MessageHandlers {
   constructor(db, wsServer) {
     this.db = db;
@@ -234,13 +243,36 @@ class MessageHandlers {
 
   /**
    * Handle LoadMission message (9010)
+   *
+   * Three request forms:
+   *   {list:true, kind?, unitId?, before?} — P1F-01 metadata-only listing
+   *     (no `data` column), account-scoped, newest first, max 200.
+   *   {missionId} — one full row including `data` (account-scoped).
+   *   {unitId}  — legacy form: all full rows for the unit (unchanged).
+   *
+   * `rq` is an opaque client request id echoed back inside `ms` so callers
+   * can match replies to requests (P1F-02).
    */
   async handleLoadMission(connectionId, message) {
     const payload = this.getPayload(message);
-    const { unitId, missionId, accountId } = payload;
+    const { unitId, missionId, accountId, list, kind, before, rq } = payload;
     const connection = this.wsServer.getConnection(connectionId);
 
     try {
+      if (list === true) {
+        const missions = this.db.listMissionsMeta(accountId, { kind, unitId, before });
+        this.db.logAccess(unitId || null, 'load', 'mission', null, connection.commServerId);
+        this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_LoadMission, {
+          s: 'OK',
+          list: true,
+          missions: missions,
+          unitId: unitId || null,
+          rq: rq
+        }, true));
+        logger.info(`Listed ${missions.length} missions for account ${accountId}`);
+        return;
+      }
+
       logger.info(`LoadMission request for unit ${unitId}${missionId ? ', mission ' + missionId : ''} from comm server ${connection.commServerId}`);
 
       let mission;
@@ -260,7 +292,8 @@ class MessageHandlers {
       this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_LoadMission, {
         s: 'OK',
         mission: mission,
-        unitId: unitId
+        unitId: unitId,
+        rq: rq
       }, true));
 
       logger.info(`Loaded mission for unit ${unitId}`);
@@ -269,30 +302,98 @@ class MessageHandlers {
       
       this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_LoadMission, {
         s: 'ERROR:' + error.message,
-        unitId: unitId
+        unitId: unitId,
+        rq: rq
       }, false, error.message));
     }
   }
 
   /**
    * Handle SaveMission message (9011)
+   *
+   * P1F-01 additions over the legacy form:
+   *  - `kind` (default 'de_plan') validated against MISSION_KINDS.
+   *  - `meta` small JSON descriptor (≤ 2 KB) stored beside the row.
+   *  - `missionId` may be omitted — a UUID v4 is generated server-side and
+   *    returned in the reply.
+   *  - A client-supplied id that exists under another account is rejected;
+   *    it is never overwritten.
+   *  - `limits.max_mission_bytes` (default 1 MB) caps the serialized data.
+   *  - `limits.max_missions_per_kind.<kind>` optional extra quota on inserts.
+   *  - `rq` echoed in `ms` for request/reply correlation.
    */
   async handleSaveMission(connectionId, message) {
     const payload = this.getPayload(message);
-    const { unitId, missionId, accountId, name, data } = payload;
+    const { unitId, accountId, name, data, kind, meta, rq } = payload;
     const connection = this.wsServer.getConnection(connectionId);
+    let c_missionId = payload.missionId;
 
     try {
-      logger.info(`SaveMission request for unit ${unitId}, mission ${missionId}`);
+      const c_kind = (kind === null || kind === undefined || kind === '') ? 'de_plan' : kind;
+      if (!MISSION_KINDS.has(c_kind)) {
+        this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
+          s: `ERROR:unknown mission kind '${c_kind}'`,
+          missionId: c_missionId,
+          unitId: unitId,
+          rq: rq
+        }, false, 'unknown mission kind'));
+        return;
+      }
+
+      // Server-generated id when the caller does not supply one.
+      if (c_missionId === null || c_missionId === undefined || c_missionId === '') {
+        c_missionId = require('crypto').randomUUID();
+      }
+
+      logger.info(`SaveMission request for unit ${unitId}, mission ${c_missionId} (kind ${c_kind})`);
 
       // Ensure unit exists
       this.db.upsertUnit(unitId, null, connection.commServerId);
 
-      // Per-account / per-unit quota: only gate NEW inserts, not updates of
-      // an existing mission (preserves ON CONFLICT(id) DO UPDATE semantics).
-      const existing = this.db.getMission(missionId, accountId);
-      if (!existing) {
-        const limits = serverConfig.m_configuration.limits || {};
+      const limits = serverConfig.m_configuration.limits || {};
+
+      // Size cap on the serialized payload.
+      const maxBytes = limits.max_mission_bytes ?? CONST_MISSION_DATA_MAX_BYTES_DEFAULT;
+      const dataBytes = Buffer.byteLength(JSON.stringify(data ?? null));
+      if (maxBytes > 0 && dataBytes > maxBytes) {
+        logger.warn(`SaveMission rejected: mission ${c_missionId} is ${dataBytes} bytes (limit ${maxBytes})`);
+        this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
+          s: `ERROR:mission too large (${dataBytes} bytes > ${maxBytes})`,
+          missionId: c_missionId,
+          unitId: unitId,
+          rq: rq
+        }, false, 'mission too large'));
+        return;
+      }
+
+      // meta is a small descriptor — cap it.
+      if (meta !== null && meta !== undefined &&
+          Buffer.byteLength(JSON.stringify(meta)) > CONST_MISSION_META_MAX_BYTES) {
+        this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
+          s: `ERROR:mission meta too large (> ${CONST_MISSION_META_MAX_BYTES} bytes)`,
+          missionId: c_missionId,
+          unitId: unitId,
+          rq: rq
+        }, false, 'mission meta too large'));
+        return;
+      }
+
+      // Ownership: an id that exists under another account is rejected
+      // outright — the old ON CONFLICT upsert would have overwritten it.
+      const ownerAccount = this.db.getMissionAccountId(c_missionId);
+      if (ownerAccount !== null && ownerAccount !== accountId) {
+        logger.warn(`SaveMission rejected: id ${c_missionId} belongs to another account (caller ${accountId})`);
+        this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
+          s: 'ERROR:mission id belongs to another account',
+          missionId: c_missionId,
+          unitId: unitId,
+          rq: rq
+        }, false, 'mission id belongs to another account'));
+        return;
+      }
+
+      // Quotas gate NEW inserts only, not updates of an existing mission.
+      if (ownerAccount === null) {
         const perAccount = limits.max_missions_per_account ?? 0;
         const perUnit = limits.max_missions_per_unit ?? 0;
 
@@ -301,8 +402,9 @@ class MessageHandlers {
           logger.warn(`SaveMission rejected: account ${accountId} at ${count}/${perAccount}`);
           this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
             s: `ERROR:mission quota exceeded (${count}/${perAccount} per account)`,
-            missionId: missionId,
-            unitId: unitId
+            missionId: c_missionId,
+            unitId: unitId,
+            rq: rq
           }, false, 'mission quota exceeded'));
           return;
         }
@@ -311,33 +413,52 @@ class MessageHandlers {
           logger.warn(`SaveMission rejected: account ${accountId} unit ${unitId} at ${count}/${perUnit}`);
           this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
             s: `ERROR:mission quota exceeded (${count}/${perUnit} per unit)`,
-            missionId: missionId,
-            unitId: unitId
+            missionId: c_missionId,
+            unitId: unitId,
+            rq: rq
+          }, false, 'mission quota exceeded'));
+          return;
+        }
+        const perKind = (limits.max_missions_per_kind && limits.max_missions_per_kind[c_kind]) ?? 0;
+        if (perKind > 0 && this.db.countMissionsByKind(accountId, c_kind) >= perKind) {
+          const count = this.db.countMissionsByKind(accountId, c_kind);
+          logger.warn(`SaveMission rejected: account ${accountId} kind ${c_kind} at ${count}/${perKind}`);
+          this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
+            s: `ERROR:mission quota exceeded (${count}/${perKind} per kind ${c_kind})`,
+            missionId: c_missionId,
+            unitId: unitId,
+            rq: rq
           }, false, 'mission quota exceeded'));
           return;
         }
       }
 
       // Save mission
-      this.db.saveMission(missionId, unitId, accountId, name, data);
+      this.db.saveMission(c_missionId, unitId, accountId, name, data, c_kind, meta);
 
       // Log access
-      this.db.logAccess(unitId, 'save', 'mission', missionId, connection.commServerId);
+      this.db.logAccess(unitId, 'save', 'mission', c_missionId, connection.commServerId);
 
-      // Send response
+      // Send response — missionId + version let the caller track the row.
+      const saved = this.db.getMission(c_missionId, accountId);
       this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
         s: 'OK:save',
-        missionId: missionId,
-        unitId: unitId
+        missionId: c_missionId,
+        unitId: unitId,
+        kind: c_kind,
+        version: saved ? saved.version : 1,
+        rq: rq
       }, true));
 
-      logger.info(`Saved mission ${missionId} for unit ${unitId}`);
+      logger.info(`Saved mission ${c_missionId} for unit ${unitId}`);
     } catch (error) {
       logger.error(`Error saving mission for unit ${unitId}: ${error.message}`);
       
       this.wsServer.send(connectionId, this.buildResponseEnvelope(message, CONST_TYPE_AndruavSystem_SaveMission, {
         s: 'ERROR:' + error.message,
-        unitId: unitId
+        missionId: c_missionId,
+        unitId: unitId,
+        rq: rq
       }, false, error.message));
     }
   }

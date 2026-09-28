@@ -442,7 +442,8 @@ router.get('/api/missions', requireAuth, (req, res) => {
             page: parseInt(req.query.page) || 1,
             limit: parseInt(req.query.limit) || 50,
             unitId: req.query.unitId || null,
-            accountId: req.query.accountId || null
+            accountId: req.query.accountId || null,
+            kind: req.query.kind || null
         });
         res.json({ error: 0, ...result });
     } catch (error) {

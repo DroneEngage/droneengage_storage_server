@@ -4,6 +4,17 @@ const fs = require('fs');
 const logger = require('./logger');
 const serverConfig = require('../js_serverConfig.js');
 
+/**
+ * Parse the JSON columns of a raw missions row in place (`data`, `meta`)
+ * and return it. Meta stays NULL-safe: missing column or empty string → null.
+ */
+function fn_parseMissionRow(mission) {
+  if (!mission) return mission;
+  try { mission.data = JSON.parse(mission.data); } catch (e) { /* leave raw */ }
+  try { mission.meta = mission.meta ? JSON.parse(mission.meta) : null; } catch (e) { mission.meta = null; }
+  return mission;
+}
+
 class DatabaseManager {
   constructor() {
     const config = serverConfig.m_configuration;
@@ -138,6 +149,61 @@ class DatabaseManager {
         logger.error(`Migration: failed to add account_id to missions: ${error.message}`);
       }
     }
+
+    // Migration (P1F-01): kind distinguishes v1 plans from v2 operations/packages.
+    try {
+      this.db.exec("ALTER TABLE missions ADD COLUMN kind TEXT NOT NULL DEFAULT 'de_plan'");
+      logger.info('Migration: added kind column to missions table');
+    } catch (error) {
+      if (error.message.indexOf('duplicate column') === -1) {
+        logger.error(`Migration: failed to add kind to missions: ${error.message}`);
+      }
+    }
+
+    // Migration (P1F-01): size = byte length of the stored JSON data.
+    try {
+      this.db.exec("ALTER TABLE missions ADD COLUMN size INTEGER NOT NULL DEFAULT 0");
+      logger.info('Migration: added size column to missions table');
+    } catch (error) {
+      if (error.message.indexOf('duplicate column') === -1) {
+        logger.error(`Migration: failed to add size to missions: ${error.message}`);
+      }
+    }
+
+    // Migration (P1F-01): meta = small JSON descriptor ({op, roles, op_hash} for
+    // operations; {op, role, hash, run} for packages). NULL when absent.
+    try {
+      this.db.exec("ALTER TABLE missions ADD COLUMN meta TEXT");
+      logger.info('Migration: added meta column to missions table');
+    } catch (error) {
+      if (error.message.indexOf('duplicate column') === -1) {
+        logger.error(`Migration: failed to add meta to missions: ${error.message}`);
+      }
+    }
+
+    // One-time backfill of the size column for rows that predate it.
+    try {
+      this.db.exec("UPDATE missions SET size = length(data) WHERE size = 0");
+    } catch (error) {
+      logger.error(`Migration: failed to backfill missions.size: ${error.message}`);
+    }
+
+    // Backfill (P1F-01): rows saved before the server generated ids carry NULL
+    // in `id` — SQLite allows NULL in a TEXT PRIMARY KEY, and every client save
+    // sent missionId:null, so old rows share id NULL and can never be loaded,
+    // selected or deleted by id. Assign each a fresh UUID (matched by rowid).
+    try {
+      const orphans = this.db.prepare('SELECT rowid FROM missions WHERE id IS NULL').all();
+      const upd = this.db.prepare('UPDATE missions SET id = ? WHERE rowid = ?');
+      for (const row of orphans) {
+        upd.run(require('crypto').randomUUID(), row.rowid);
+      }
+      if (orphans.length > 0) {
+        logger.info(`Migration: backfilled id for ${orphans.length} mission row(s)`);
+      }
+    } catch (error) {
+      logger.error(`Migration: failed to backfill missions.id: ${error.message}`);
+    }
   }
 
   /**
@@ -154,6 +220,7 @@ class DatabaseManager {
       'CREATE INDEX IF NOT EXISTS idx_access_log_created_at ON access_log(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_missions_unit_id ON missions(unit_id)',
       'CREATE INDEX IF NOT EXISTS idx_missions_account_id ON missions(account_id)',
+      'CREATE INDEX IF NOT EXISTS idx_missions_account_kind ON missions(account_id, kind, updated_at)',
       'CREATE INDEX IF NOT EXISTS idx_news_scope ON news(scope)',
       'CREATE INDEX IF NOT EXISTS idx_news_account_id ON news(account_id)',
       'CREATE INDEX IF NOT EXISTS idx_news_disabled ON news(disabled)',
@@ -269,21 +336,56 @@ class DatabaseManager {
    * Mission operations
    */
 
-  // Save mission
-  saveMission(missionId, unitId, accountId, name, data) {
+  /**
+   * Returns the owning account_id of a mission id, or null when the id does
+   * not exist. NOT account-scoped — used to detect cross-account id reuse
+   * (P1F-01): a client-supplied id that already exists under another account
+   * must be rejected, never overwritten.
+   */
+  getMissionAccountId(missionId) {
+    const row = this.db.prepare('SELECT account_id FROM missions WHERE id = ?').get(missionId);
+    return row ? row.account_id : null;
+  }
+
+  /**
+   * Save (insert or update) a mission.
+   *
+   * Replaces the old `ON CONFLICT(id) DO UPDATE` upsert, which let one account
+   * overwrite another account's row when the id collided. Now: the id's owner
+   * is checked first — a foreign id throws MISSION_FOREIGN_ID; a same-account
+   * id updates (version + 1); a new id inserts.
+   *
+   * @param {string} kind  one of de_plan | de_operation | de_package | de_journal
+   * @param {object|null} meta small JSON descriptor stored as TEXT
+   */
+  saveMission(missionId, unitId, accountId, name, data, kind = 'de_plan', meta = null) {
+    const c_data = JSON.stringify(data);
+    const c_meta = (meta === null || meta === undefined) ? null : JSON.stringify(meta);
+    const c_size = Buffer.byteLength(c_data);
+
+    const ownerAccount = this.getMissionAccountId(missionId);
+    if (ownerAccount !== null) {
+      if (ownerAccount !== accountId) {
+        const err = new Error('mission id belongs to another account');
+        err.code = 'MISSION_FOREIGN_ID';
+        throw err;
+      }
+      const stmt = this.db.prepare(`
+        UPDATE missions SET
+          unit_id = ?, account_id = ?, name = ?, data = ?,
+          kind = ?, size = ?, meta = ?,
+          version = version + 1,
+          updated_at = strftime('%s', 'now')
+        WHERE id = ? AND account_id = ?
+      `);
+      return stmt.run(unitId, accountId, name, c_data, kind, c_size, c_meta, missionId, accountId);
+    }
+
     const stmt = this.db.prepare(`
-      INSERT INTO missions (id, unit_id, account_id, name, data)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        unit_id = excluded.unit_id,
-        account_id = excluded.account_id,
-        name = excluded.name,
-        data = excluded.data,
-        version = version + 1,
-        updated_at = strftime('%s', 'now')
+      INSERT INTO missions (id, unit_id, account_id, name, data, kind, size, meta)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    
-    return stmt.run(missionId, unitId, accountId, name, JSON.stringify(data));
+    return stmt.run(missionId, unitId, accountId, name, c_data, kind, c_size, c_meta);
   }
 
   // Load missions for unit (scoped by account_id)
@@ -295,9 +397,41 @@ class DatabaseManager {
     `);
     
     const missions = stmt.all(unitId, accountId);
-    return missions.map(mission => ({
-      ...mission,
-      data: JSON.parse(mission.data)
+    return missions.map(mission => fn_parseMissionRow(mission));
+  }
+
+  /**
+   * Metadata-only listing (P1F-01) — no `data` column, so pickers stay cheap
+   * as plans grow. Scoped by account; optional kind/unitId filters and
+   * `before` (updated_at) paging. Returns newest first, max 200 rows.
+   * Field names match the wire contract: missionId/unitId camelCase.
+   */
+  listMissionsMeta(accountId, { kind = null, unitId = null, before = null, limit = 200 } = {}) {
+    const where = ['account_id = ?'];
+    const params = [accountId];
+    if (kind) { where.push('kind = ?'); params.push(kind); }
+    if (unitId) { where.push('unit_id = ?'); params.push(unitId); }
+    if (before !== null && before !== undefined) { where.push('updated_at < ?'); params.push(before); }
+    params.push(Math.min(200, Math.max(1, limit)));
+
+    const rows = this.db.prepare(`
+      SELECT id, unit_id, name, kind, size, meta, version, created_at, updated_at
+      FROM missions
+      WHERE ${where.join(' AND ')}
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all(...params);
+
+    return rows.map(m => ({
+      missionId: m.id,
+      unitId: m.unit_id,
+      name: m.name,
+      kind: m.kind,
+      size: m.size,
+      meta: m.meta ? JSON.parse(m.meta) : null,
+      version: m.version,
+      created_at: m.created_at,
+      updated_at: m.updated_at
     }));
   }
 
@@ -307,7 +441,7 @@ class DatabaseManager {
     const mission = stmt.get(missionId, accountId);
     
     if (mission) {
-      mission.data = JSON.parse(mission.data);
+      fn_parseMissionRow(mission);
     }
     
     return mission;
@@ -424,6 +558,14 @@ class DatabaseManager {
       `SELECT COUNT(*) AS n FROM missions WHERE unit_id = ? AND account_id = ?`
     );
     return stmt.get(unitId, accountId).n;
+  }
+
+  // Count missions owned by an account of a specific kind (P1F-01 per-kind quotas).
+  countMissionsByKind(accountId, kind) {
+    const stmt = this.db.prepare(
+      `SELECT COUNT(*) AS n FROM missions WHERE account_id = ? AND kind = ?`
+    );
+    return stmt.get(accountId, kind).n;
   }
 
   /**
@@ -634,8 +776,8 @@ class DatabaseManager {
     return { rows: parsed, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
   }
 
-  // Paginated missions list, optionally filtered by unit/account
-  getMissionsPage({ page = 1, limit = 50, unitId = null, accountId = null } = {}) {
+  // Paginated missions list, optionally filtered by unit/account/kind
+  getMissionsPage({ page = 1, limit = 50, unitId = null, accountId = null, kind = null } = {}) {
     const p = Math.max(1, page);
     const l = Math.min(500, Math.max(1, limit));
     const offset = (p - 1) * l;
@@ -644,15 +786,13 @@ class DatabaseManager {
     let params = [];
     if (unitId) { where.push('unit_id = ?'); params.push(unitId); }
     if (accountId) { where.push('account_id = ?'); params.push(accountId); }
+    if (kind) { where.push('kind = ?'); params.push(kind); }
     const whereClause = where.length ? ' WHERE ' + where.join(' AND ') : '';
 
     const total = this.db.prepare('SELECT COUNT(*) as count FROM missions' + whereClause).get(...params).count;
     const rows = this.db.prepare('SELECT * FROM missions' + whereClause + ' ORDER BY updated_at DESC LIMIT ? OFFSET ?').all(...params, l, offset);
 
-    const parsed = rows.map(m => {
-      try { m.data = JSON.parse(m.data); } catch (e) { /* leave raw */ }
-      return m;
-    });
+    const parsed = rows.map(m => fn_parseMissionRow(m));
 
     return { rows: parsed, total, page: p, limit: l, totalPages: Math.ceil(total / l) };
   }
