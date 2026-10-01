@@ -2,6 +2,14 @@ const logger = require('./logger');
 const database = require('./database');
 const serverConfig = require('../js_serverConfig.js');
 
+/**
+ * Fleet-coordination messages are meaningless after a delay: a queued
+ * DE_EVENT/ACK/ROSTER/WORLD/OP_CONTROL arriving minutes late would
+ * corrupt the fleet's ordering, roster or deploy state. They are never
+ * stored for offline delivery (TASK-P4A-09).
+ */
+const NEVER_QUEUE_MESSAGE_TYPES = new Set([1090, 1091, 1093, 1094]);
+
 class OfflineQueue {
   constructor(db, wsServer) {
     const config = serverConfig.m_configuration;
@@ -18,6 +26,11 @@ class OfflineQueue {
    */
   enqueue(unitId, messageType, messageData, taskId = null, priority = 0) {
     try {
+      if (NEVER_QUEUE_MESSAGE_TYPES.has(messageType)) {
+        logger.warn(`Refusing to queue fleet message type ${messageType} for unit ${unitId}`);
+        return { success: false, error: 'Message type must not be queued' };
+      }
+
       // Check queue size
       const queueSize = this.db.getQueueSize(unitId);
 
