@@ -1,0 +1,26 @@
+# pure-gates - every push, pure logic only.
+#
+#   tests    tests/*.js - mission storage, quota limits and mission
+#            kinds against an in-memory better-sqlite3 database.
+#            Self-contained: no real DB file, no comm server.
+#
+# No servers, no SITL, no sim bring-up.
+name: pure-gates
+on: [push, pull_request]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: install
+        run: npm ci --no-audit --no-fund
+
+      - name: test
+        run: npm test
