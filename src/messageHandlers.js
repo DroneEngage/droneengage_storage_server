@@ -17,8 +17,9 @@ const CONST_TYPE_AndruavSystem_DeleteNews = 9017; // Delete/disable news from st
 const CONST_TYPE_AndruavSystem_NewsPush = 9018; // Unsolicited push: storage -> comm servers
 
 // Allowed mission kinds (P1F-01): v1 plans, v2 operations, compiled packages
-// (reserved for P4A-09) and flight journals (reserved for Phase 6).
-const MISSION_KINDS = new Set(['de_plan', 'de_operation', 'de_package', 'de_journal']);
+// (P4A-09 deploy archive), flight journals (Phase 6) and the static op
+// story graph (TASK-SG-02 — one row per op_hash).
+const MISSION_KINDS = new Set(['de_plan', 'de_operation', 'de_package', 'de_journal', 'de_opgraph']);
 // meta is a small JSON descriptor stored beside the mission (2 KB cap).
 const CONST_MISSION_META_MAX_BYTES = 2048;
 // Default cap on the serialized `data` column when limits.max_mission_bytes

@@ -132,6 +132,24 @@ const last = () => sent[sent.length - 1];
         assert.deepStrictEqual(m.meta, { op: 'op1', roles: ['solo'] });
     });
 
+    await test('de_opgraph kind saves, and a deterministic id upserts (no second row)', async () => {
+        sent.length = 0;
+        const c_meta = { op: 'op1', op_hash: 'sha256:abc', schema: 'de.opgraph/1' };
+        await handlers.handleSaveMission('c1', { mt: 9011, ms: { unitId: '_general_', missionId: 'sg-graph-abc', accountId: 'acctA', name: 'Op graph', kind: 'de_opgraph', meta: c_meta, data: { schema: 'de.opgraph/1', nodes: [], edges: [] } } });
+        assert.strictEqual(last().ms.s, 'OK:save');
+        const m = db.getMission('sg-graph-abc', 'acctA');
+        assert.strictEqual(m.kind, 'de_opgraph');
+        assert.strictEqual(m.meta.op_hash, 'sha256:abc');
+        // re-writing under the same deterministic id updates the row in
+        // place — a re-deployed op must not add a second graph row
+        await handlers.handleSaveMission('c1', { mt: 9011, ms: { unitId: '_general_', missionId: 'sg-graph-abc', accountId: 'acctA', name: 'Op graph', kind: 'de_opgraph', meta: c_meta, data: { v: 2 } } });
+        assert.strictEqual(last().ms.version, 2);
+        sent.length = 0;
+        await handlers.handleLoadMission('c1', { mt: 9010, ms: { list: true, accountId: 'acctA', kind: 'de_opgraph' } });
+        const c_rows = last().ms.missions.filter((r) => r.meta?.op_hash === 'sha256:abc');
+        assert.strictEqual(c_rows.length, 1, 'same op_hash must list exactly one de_opgraph row');
+    });
+
     await test('unknown kind is rejected', async () => {
         sent.length = 0;
         await handlers.handleSaveMission('c1', { mt: 9011, ms: { unitId: 'unitX', missionId: 'bad1', accountId: 'acctA', name: 'X', kind: 'waypoint_zip', data: {} } });

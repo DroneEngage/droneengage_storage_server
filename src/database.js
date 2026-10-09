@@ -355,7 +355,7 @@ class DatabaseManager {
    * is checked first — a foreign id throws MISSION_FOREIGN_ID; a same-account
    * id updates (version + 1); a new id inserts.
    *
-   * @param {string} kind  one of de_plan | de_operation | de_package | de_journal
+   * @param {string} kind  one of de_plan | de_operation | de_package | de_journal | de_opgraph
    * @param {object|null} meta small JSON descriptor stored as TEXT
    */
   saveMission(missionId, unitId, accountId, name, data, kind = 'de_plan', meta = null) {
