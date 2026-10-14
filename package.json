@@ -33,7 +33,7 @@
     "sqlite3": "^5.1.6",
     "winston": "^3.11.0",
     "ws": "^8.14.2",
-    "droneengage_server_common": "git+ssh://git@github.com:DroneEngage/droneengage_server_common.git#v1.0.0"
+    "droneengage_server_common": "git+ssh://git@github.com:DroneEngage/droneengage_server_common.git#v1.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
