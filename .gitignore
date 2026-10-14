@@ -16,6 +16,9 @@ data/
 # Local config override (merged on top of server.config at runtime)
 server.config.local
 
+# S2S shared secret (auto-generated, chmod 600 — never commit)
+s2s_shared_secret.key
+
 # Environment
 .env
 .env.local
