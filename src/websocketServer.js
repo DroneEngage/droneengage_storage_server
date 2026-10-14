@@ -19,12 +19,36 @@ class WebSocketServer {
     this.wss = null;
     this.connections = new Map(); // Map of connectionId -> connection info
     this.connectionCounter = 0;
+    this.s2sAuthMethod = (config.s2s_cert_enabled === true)
+      ? s2sAuth.CONST_S2S_AUTH_METHOD_ED25519
+      : s2sAuth.CONST_S2S_AUTH_METHOD_HMAC;
   }
 
   /**
    * Start WebSocket server
    */
   start() {
+    // Validate the S2S auth mode before opening the port (fail closed).
+    if (this.config.s2s_cert_enabled === true) {
+      const keys = this.config.s2s_trusted_server_keys;
+      if ((keys == null) || (Object.keys(keys).length === 0)) {
+        logger.error('s2s_cert_enabled=true but s2s_trusted_server_keys is empty — EVERY connection will be rejected (silent lockout). Configure trusted public keys or set s2s_cert_enabled=false for shared-secret mode.');
+      }
+      this.s2sAuthMethod = s2sAuth.CONST_S2S_AUTH_METHOD_ED25519;
+    } else {
+      // Shared-secret mode: every connection (including localhost) must answer
+      // the nonce challenge with HMAC-SHA256(nonce, shared_secret). Throws and
+      // aborts startup when the secret is missing or a placeholder.
+      try {
+        s2sAuth.fn_getSharedSecret(true);
+      } catch (error) {
+        logger.error(`S2S shared-secret configuration error: ${error.message}`);
+        process.exit(1);
+      }
+      this.s2sAuthMethod = s2sAuth.CONST_S2S_AUTH_METHOD_HMAC;
+      logger.info('S2S shared-secret (HMAC) authentication enabled');
+    }
+
     let wserver;
 
     // Create HTTP or HTTPS server based on SSL configuration
@@ -113,15 +137,10 @@ class WebSocketServer {
       logger.error(`Connection ${connectionId} error: ${error.message}`);
     });
 
-    // Send S2S auth challenge only if s2s_cert_enabled
-    if (this.config.s2s_cert_enabled === true) {
-      this.sendAuthChallenge(connectionId);
-    } else {
-      // If S2S cert auth is disabled, mark as authenticated immediately
-      connectionInfo.authenticated = true;
-      connectionInfo.authPending = false;
-      logger.info(`Connection ${connectionId} accepted without S2S auth (s2s_cert_enabled=false)`);
-    }
+    // Every connection must complete the S2S handshake — Ed25519 when
+    // s2s_cert_enabled, shared-secret HMAC otherwise. No exemption for
+    // localhost or any other peer.
+    this.sendAuthChallenge(connectionId);
   }
 
   /**
@@ -135,7 +154,7 @@ class WebSocketServer {
     connection.authNonce = nonce;
     connection.authChallengeSent = Date.now();
 
-    const challenge = s2sAuth.fn_buildChallenge(nonce);
+    const challenge = s2sAuth.fn_buildChallenge(nonce, this.s2sAuthMethod);
     connection.ws.send(challenge);
 
     logger.debug(`Sent S2S auth challenge to connection ${connectionId}`);
@@ -203,8 +222,11 @@ class WebSocketServer {
     if (!connection) return;
 
     try {
-      // Verify signature using the comm server's public key
-      const isValid = s2sAuth.fn_verify(connection.authNonce, envelope.sig, envelope.id);
+      // Ed25519 mode verifies the signature against the comm server's public
+      // key; shared-secret mode verifies HMAC-SHA256(nonce, shared_secret).
+      const isValid = (this.s2sAuthMethod === s2sAuth.CONST_S2S_AUTH_METHOD_ED25519)
+        ? s2sAuth.fn_verify(connection.authNonce, envelope.sig, envelope.id)
+        : s2sAuth.fn_verifyHmac(connection.authNonce, envelope.sig);
 
       if (isValid) {
         connection.authenticated = true;

@@ -4,7 +4,14 @@ This document describes the Server-to-Server (S2S) authentication mechanism used
 
 ## Overview
 
-The storage server authenticates connecting comm servers using an Ed25519 challenge-response handshake. This ensures that only trusted comm servers can perform task and mission operations.
+The storage server authenticates connecting comm servers using a challenge-response handshake. This ensures that only trusted comm servers can perform task and mission operations. **Every connection must authenticate** — there is no unauthenticated path, and there is no localhost exemption.
+
+Two modes exist, selected by `s2s_cert_enabled`:
+
+| Mode | Config | Credential |
+|------|--------|-----------|
+| Certificate | `s2s_cert_enabled: true` | Ed25519 signature over the nonce, verified against `s2s_trusted_server_keys` |
+| Shared secret | `s2s_cert_enabled: false` | `HMAC-SHA256(nonce, shared_secret)` verified with `crypto.timingSafeEqual` |
 
 The implementation is in `src/js_s2s_auth.js` and uses only Node.js built-in `crypto` — no third-party dependencies.
 
@@ -19,14 +26,19 @@ The implementation is in `src/js_s2s_auth.js` and uses only Node.js built-in `cr
         │                                      │
         │  2. Storage sends nonce challenge     │
         │──────────────────────────────────────►│
-        │  { s2s_auth: "challenge", nonce: ... }│
+        │  { s2s_auth: "challenge", nonce: ..., │
+        │    method: "ed25519"|"hmac-sha256" }  │
         │                                      │
-        │  3. Comm signs nonce with private key │
+        │  3. Comm answers the challenge:       │
+        │     ed25519 -> sign nonce (priv key)  │
+        │     hmac    -> HMAC-SHA256(nonce,     │
+        │                shared_secret)         │
         │◄──────────────────────────────────────│
         │  { s2s_auth: "response", sig: ..., id: "DE_CommSrv" }
         │                                      │
-        │  4. Storage verifies signature        │
-        │     using comm's public key           │
+        │  4. Storage verifies per its mode:    │
+        │     ed25519 -> signature vs public key│
+        │     hmac    -> timingSafeEqual(HMAC)  │
         │                                      │
         │  5. Auth success or connection close  │
         │──────────────────────────────────────►│
@@ -45,13 +57,23 @@ The implementation is in `src/js_s2s_auth.js` and uses only Node.js built-in `cr
 
 The handshake must complete within `CONST_S2S_AUTH_HANDSHAKE_TIMEOUT` (8000 ms). If the comm server does not respond in time, the storage server closes the connection with code 1008 ("Auth timeout").
 
-## Disabling Authentication
+## Shared-Secret Mode (`s2s_cert_enabled: false`)
 
-When `s2s_cert_enabled` is `false` in the config, the storage server skips the challenge-response handshake entirely and marks all connections as authenticated immediately. This is suitable for:
+**Breaking change:** `s2s_cert_enabled: false` no longer means "no auth". It now selects shared-secret mode — every connection must answer the nonce challenge with `HMAC-SHA256(nonce, shared_secret)`. Deployments that relied on the old open behaviour must provision the same secret on both sides.
 
-- Air-gapped / isolated network environments
-- Development and testing
-- Environments where network-level security is sufficient
+The secret is never stored in `server.config` (a shipped value would be a public credential). It is loaded from, in order:
+
+1. The `de_s2s_shared_secret` environment variable.
+2. The file named by `s2s_shared_secret_file` (default `./s2s_shared_secret.key`). On the storage server a missing file is **auto-generated** with a random 32-byte hex secret and written `chmod 600` on first boot.
+
+Fail-closed rules: a missing source, a placeholder value (e.g. `CHANGE_ME`), or a secret shorter than 16 chars makes the storage server **refuse to start** with a clear error. The comm server side does *not* auto-generate — a locally generated secret could never match; if the file is absent the handshake fails and the connection closes.
+
+| Config Key / Env | Side | Description |
+|---|---|---|
+| `s2s_shared_secret_file` | both | Path to the chmod-600 secret file (resolved from the project root) |
+| `de_s2s_shared_secret` | both | Env var holding the secret directly (overrides the file) |
+
+The secret is never sent on the wire — only the HMAC of the per-connection nonce.
 
 ## Configuration
 
@@ -71,20 +93,26 @@ The storage server needs the **public keys** of all trusted comm servers:
 
 | Config Key | Description |
 |------------|-------------|
-| `s2s_cert_enabled` | Set to `true` to require S2S auth on incoming connections |
-| `s2s_trusted_server_keys` | Map of server ID → public key PEM file path |
+| `s2s_cert_enabled` | `true` = Ed25519 cert mode, `false` = shared-secret mode |
+| `s2s_trusted_server_keys` | Map of server ID → public key PEM file path (cert mode) |
+| `s2s_shared_secret_file` | Path to the shared-secret file (shared-secret mode) |
+
+Note: with `s2s_cert_enabled=true` and an **empty** `s2s_trusted_server_keys`, every connection is rejected — the server logs a loud boot warning because that configuration is a silent lockout.
 
 ### Comm Server (Connecting Side)
 
-The comm server needs its own **private key** to sign challenges:
+The comm server needs its own **private key** to sign challenges (cert mode), or the same **shared secret** (shared-secret mode):
 
 ```json
 {
-    "s2s_my_private_key": "./ssl_local/DE_ServerComm_private.pem"
+    "s2s_my_private_key": "./ssl_local/DE_ServerComm_private.pem",
+    "s2s_shared_secret_file": "./s2s_shared_secret.key"
 }
 ```
 
-The comm server's server ID must match a key in the storage server's `s2s_trusted_server_keys`.
+The challenge envelope carries a `method` field (`ed25519` or `hmac-sha256`) telling the comm server which credential to answer with. Older storage servers send no `method`, which is treated as `ed25519`. A comm server that receives no challenge within `CONST_S2S_AUTH_HANDSHAKE_TIMEOUT` now **fails closed** and drops the connection — the old "no challenge → assume no auth required" fallthrough has been removed.
+
+The comm server's server ID must match a key in the storage server's `s2s_trusted_server_keys` (cert mode).
 
 ## Key Generation
 
@@ -126,7 +154,8 @@ The private key file is written with restrictive permissions (`0o600`).
 ```json
 {
   "s2s_auth": "challenge",
-  "nonce": "a1b2c3d4e5f6...64 hex chars"
+  "nonce": "a1b2c3d4e5f6...64 hex chars",
+  "method": "ed25519 | hmac-sha256"
 }
 ```
 
@@ -135,7 +164,7 @@ The private key file is written with restrictive permissions (`0o600`).
 ```json
 {
   "s2s_auth": "response",
-  "sig": "base64-encoded Ed25519 signature",
+  "sig": "base64 Ed25519 signature OR base64 HMAC-SHA256 of the nonce",
   "id": "DE_CommSrv"
 }
 ```
@@ -159,8 +188,13 @@ The private key file is written with restrictive permissions (`0o600`).
 | `fn_generateNonce()` | Generates a 32-byte random nonce (hex string) |
 | `fn_sign(nonce)` | Signs a nonce with the private key (base64 signature) |
 | `fn_verify(nonce, signature, serverId)` | Verifies a signature against a server's public key |
-| `fn_buildChallenge(nonce)` | Builds the challenge envelope JSON string |
-| `fn_buildResponse(nonce, id)` | Builds the signed response envelope JSON string |
+| `fn_hmacSign(nonce)` | Computes `HMAC-SHA256(nonce, shared_secret)` (base64) |
+| `fn_verifyHmac(nonce, hmac)` | Constant-time verification of an HMAC response |
+| `fn_getSharedSecret(autoGenerate)` | Loads the shared secret from env/file; optionally auto-generates the file; throws on missing/placeholder |
+| `fn_hasSharedSecret()` | True when a secret source is configured (non-throwing) |
+| `fn_buildChallenge(nonce, method)` | Builds the challenge envelope JSON string |
+| `fn_buildResponse(nonce, id)` | Builds the Ed25519-signed response envelope JSON string |
+| `fn_buildHmacResponse(nonce, id)` | Builds the HMAC response envelope JSON string |
 | `fn_parseEnvelope(msg)` | Parses a WS message as an S2S auth envelope; returns `null` if not auth-related |
 | `fn_getPrivateKey()` | Lazy-loads and caches the Ed25519 private key |
 | `fn_getPublicKeys()` | Lazy-loads and caches all trusted public keys |

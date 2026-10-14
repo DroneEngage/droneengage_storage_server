@@ -2,6 +2,20 @@
 
 Major changes to the DroneEngage storage server, newest first.
 
+## [Unreleased]
+
+- **Breaking:** there is no longer an unauthenticated S2S path. With
+  `s2s_cert_enabled=false` the server now runs shared-secret mode — every
+  WebSocket connection (localhost included) must answer the nonce challenge
+  with `HMAC-SHA256(nonce, shared_secret)`. The secret comes from
+  `s2s_shared_secret_file` (auto-generated, chmod 600, on first boot) or the
+  `de_s2s_shared_secret` env var; a missing/placeholder secret refuses to
+  start. Deployments that relied on `s2s_cert_enabled=false` meaning "open"
+  must provision the same secret on the comm server side.
+- `server_ip` default is now `127.0.0.1` (was `::`, all interfaces).
+- Boot warns when `s2s_cert_enabled=true` but `s2s_trusted_server_keys` is
+  empty (that configuration fails closed forever = silent lockout).
+
 ## [1.1.3] - 2026-09-12
 
 - Added per-account news and mission quotas, editable from the admin Settings UI.
