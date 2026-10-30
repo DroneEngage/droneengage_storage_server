@@ -4,6 +4,15 @@ Major changes to the DroneEngage storage server, newest first.
 
 ## [Unreleased]
 
+- **Rust port.** The server is rewritten in Rust (`cargo build --release`,
+  binary `de_storage_server`) and replaces the Node.js code in place: same
+  `server.config`, database file and schema, S2S protocol, dashboard URLs
+  and API, and console output. Checked by differential tests against the
+  Node.js server, including the dashboard's pages, headers and cookies and
+  the migration of old databases.
+  - Dashboard views are Jinja templates (`views/*.html`) instead of EJS.
+  - The dashboard error page no longer shows a stack trace.
+  - `scripts/gen_s2s_keys.js` is now `cargo run --bin gen_s2s_keys -- <id>`.
 - **Breaking:** there is no longer an unauthenticated S2S path. With
   `s2s_cert_enabled=false` the server now runs shared-secret mode — every
   WebSocket connection (localhost included) must answer the nonce challenge

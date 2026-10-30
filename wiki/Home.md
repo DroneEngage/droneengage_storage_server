@@ -29,8 +29,8 @@ The storage server sits between comm servers and the data layer:
 ## Quick Start
 
 ```bash
-npm install
-npm start
+cargo build --release
+./target/release/de_storage_server
 ```
 
 See [Deployment](Deployment.md) for detailed setup instructions.

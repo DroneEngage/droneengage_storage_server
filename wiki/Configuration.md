@@ -4,15 +4,15 @@ This document describes all configuration options for the DroneEngage Storage Se
 
 ## Configuration File
 
-The server is configured via `server.config` (JSON with C-style comments). The comments are stripped at load time by `js_3rd_StripJsonComments.js`, so inline `//` comments are supported.
+The server is configured via `server.config` (JSON with C-style comments). Comments are stripped at load time, so `//` and `/* */` comments are supported.
 
 A custom config file can be specified via CLI:
 
 ```bash
-node src/server.js --config=myconfig.config
+./target/release/de_storage_server --config=myconfig.config
 ```
 
-The config file path is resolved relative to the project root (`__dirname` of `js_serverConfig.js`).
+The config file path, and the relative paths inside it, are resolved from the working directory; run the server from the repository root.
 
 ## Full Default Configuration
 
@@ -72,7 +72,7 @@ The config file path is resolved relative to the project root (`__dirname` of `j
 The `server_port` can be overridden at runtime via the `de_storage_server_port` environment variable:
 
 ```bash
-de_storage_server_port=9100 npm start
+de_storage_server_port=9100 ./target/release/de_storage_server
 ```
 
 ## SSL / TLS Settings
@@ -136,4 +136,4 @@ An optional `memory_max` setting (in MB) can be added to the config. When RSS me
 }
 ```
 
-This is checked every 60 seconds by the `checkMemory()` function in `src/server.js`.
+This is checked every 60 seconds (`src/cli.rs`).

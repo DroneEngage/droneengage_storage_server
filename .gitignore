@@ -39,4 +39,7 @@ Thumbs.db
 *.temp
 
 
-package-lock.json
+
+
+# Rust build output
+target/

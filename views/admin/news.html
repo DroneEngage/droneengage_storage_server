@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link href="/public/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #212529; color: #f8f9fa; }
+        .navbar-custom { background: #343a40; }
+        .navbar-custom .navbar-brand,
+        .navbar-custom .nav-link { color: #f8f9fa !important; }
+        .card { background: #2c3034; border: 1px solid #495057; }
+        .card-header { background: #2c3034; border-bottom: 1px solid #495057; color: #f8f9fa; }
+        .text-muted { color: #adb5bd !important; }
+        .btn-primary { background: #0d6efd; border: none; }
+        .btn-primary:hover { background: #0b5ed7; }
+        .btn-outline-light { border-color: #f8f9fa; color: #f8f9fa; }
+        .btn-outline-light:hover { background: #f8f9fa; color: #212529; }
+        .table { color: #f8f9fa; border-color: #495057; }
+        .table > :not(caption) > * > * {
+            background-color: transparent; color: #f8f9fa; border-color: #495057;
+        }
+        .table-light { background: #2c3034; color: #f8f9fa; }
+        .form-control, .form-select {
+            background: #2c3034; border: 1px solid #495057; color: #f8f9fa;
+        }
+        .form-control:focus, .form-select:focus {
+            background: #2c3034; border-color: #86b7fe; color: #f8f9fa;
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+        }
+        .scope-global { color: #0dcaf0; font-weight: bold; }
+        .scope-account { color: #ffc107; }
+        .priority-2 { color: #dc3545; font-weight: bold; }
+        .priority-1 { color: #ffc107; }
+        .btn-icon { padding: 0.1rem 0.35rem; line-height: 1; }
+        .btn-icon svg { vertical-align: -0.125em; }
+        /* expiry state colors the whole row (td color is set directly by .table rules, so inherit won't work) */
+        .expiry-never td { color: var(--bs-success) !important; }
+        .expiry-future td { color: var(--bs-warning) !important; }
+        .expiry-past td { color: #fff !important; }
+    </style>
+</head>
+<body>
+    {% with activePage = "news", navbarFixed = false %}{% include "common/navbar.html" %}{% endwith %}
+
+    <div class="container-fluid mt-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Post News (Super Admin)</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">
+                    <span class="scope-global">Global</span> news reaches every GCS client on every account.
+                    <span class="scope-account">Account</span> news reaches only the GCS clients logged into that account.
+                </p>
+                <div class="row g-2">
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted">Scope</label>
+                        <select class="form-select form-select-sm" id="newScope" onchange="toggleAccountField()">
+                            <option value="global">Global</option>
+                            <option value="account">Account</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2" id="newAccountWrap" style="display:none;">
+                        <label class="form-label small text-muted">Target Account ID</label>
+                        <input type="text" class="form-control form-control-sm" id="newAccountId" placeholder="account id">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted">Priority</label>
+                        <select class="form-select form-select-sm" id="newPriority">
+                            <option value="0">Info</option>
+                            <option value="1">Warning</option>
+                            <option value="2">Critical</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">Title</label>
+                        <input type="text" class="form-control form-control-sm" id="newTitle" placeholder="optional title">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">Expires (optional)</label>
+                        <div class="d-flex gap-1">
+                            <input type="date" class="form-control form-control-sm" id="newExpiresDate">
+                            <input type="time" class="form-control form-control-sm" id="newExpiresTime" step="1">
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-2 mt-2">
+                    <div class="col-md-10">
+                        <label class="form-label small text-muted">Body</label>
+                        <textarea class="form-control form-control-sm" id="newBody" rows="2" placeholder="news text"></textarea>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button class="btn btn-primary btn-sm w-100" onclick="postNews()">Post News</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">News</h5>
+                <button class="btn btn-primary btn-sm" onclick="loadNews()">Refresh</button>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">Scope</label>
+                        <select class="form-select form-select-sm" id="filterScope">
+                            <option value="">All scopes</option>
+                            <option value="global">Global</option>
+                            <option value="account">Account</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">Account ID</label>
+                        <select class="form-select form-select-sm" id="filterAccount">
+                            <option value="">All accounts</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="filterIncludeDisabled">
+                            <label class="form-check-label small text-muted" for="filterIncludeDisabled">Include disabled</label>
+                        </div>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button class="btn btn-primary btn-sm w-100" onclick="loadNews(1)">Filter</button>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-striped table-bordered">
+                        <thead class="table-light">
+                            <tr>
+                                <th>ID</th>
+                                <th>Scope</th>
+                                <th>Account</th>
+                                <th>Priority</th>
+                                <th>Title</th>
+                                <th>Body</th>
+                                <th>Expires</th>
+                                <th>Updated</th>
+                                <th>Status</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="newsBody">
+                            <tr><td colspan="10" class="text-center text-muted">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted small" id="pageInfo">-</span>
+                    <div>
+                        <button class="btn btn-outline-light btn-sm me-2" id="prevBtn" onclick="changePage(-1)">Previous</button>
+                        <button class="btn btn-outline-light btn-sm" id="nextBtn" onclick="changePage(1)">Next</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/public/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let m_page = 1;
+        const m_limit = 50;
+        const PRIORITY_LABELS = { 0: 'Info', 1: 'Warning', 2: 'Critical' };
+        const m_newsById = {};
+
+        // Inline Bootstrap Icons (self-hosted, CSP-safe - no external requests)
+        const svgIcon = (paths) => `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">${paths}</svg>`;
+        const ICON_CLONE = svgIcon('<path d="M13 0H6a2 2 0 0 0-2 2 2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2 2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 13V4a2 2 0 0 0-2-2H5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1zM3 4a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4z"/>');
+        const ICON_TRASH = svgIcon('<path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>');
+        const ICON_EYE = svgIcon('<path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.133 13.133 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/>');
+        const ICON_EYE_SLASH = svgIcon('<path d="M13.359 11.238C15.06 9.72 16 8 16 8s-3-5.5-8-5.5a7.028 7.028 0 0 0-2.79.588l.77.771A5.944 5.944 0 0 1 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.134 13.134 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755-.165.165-.337.328-.517.486l.708.709z"/><path d="M11.297 9.176a3.5 3.5 0 0 0-4.474-4.474l.823.823a2.5 2.5 0 0 1 2.829 2.829l.822.822zm-2.943 1.299.822.822a3.5 3.5 0 0 1-4.474-4.474l.823.823a2.5 2.5 0 0 0 2.829 2.829z"/><path d="M3.35 5.47c-.18.16-.353.322-.518.487A13.134 13.134 0 0 0 1.172 8l.195.288c.335.48.83 1.12 1.465 1.755C4.121 11.332 5.881 12.5 8 12.5c.716 0 1.39-.133 2.02-.36l.77.772A7.029 7.029 0 0 1 8 13.5C3 13.5 0 8 0 8s.939-1.721 2.641-3.238l.708.709zm10.296 8.884-12-12 .708-.708 12 12-.708.708z"/>');
+
+        function fmtTime(epoch) {
+            if (!epoch) return '-';
+            return new Date(epoch * 1000).toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+        }
+
+        function expiryClass(epoch) {
+            if (!epoch) return 'expiry-never';
+            return (epoch * 1000 > Date.now()) ? 'expiry-future' : 'expiry-past';
+        }
+
+        function toLocalInputValue(epoch) {
+            if (!epoch) return '';
+            const d = new Date(epoch * 1000);
+            const pad = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+
+        function escapeHtml(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function toggleAccountField() {
+            const scope = document.getElementById('newScope').value;
+            document.getElementById('newAccountWrap').style.display = scope === 'account' ? '' : 'none';
+        }
+
+        async function postNews() {
+            const scope = document.getElementById('newScope').value;
+            const accountId = document.getElementById('newAccountId').value.trim();
+            const priority = document.getElementById('newPriority').value;
+            const title = document.getElementById('newTitle').value.trim();
+            const body = document.getElementById('newBody').value.trim();
+            const expiresDate = document.getElementById('newExpiresDate').value;
+            const expiresTime = document.getElementById('newExpiresTime').value;
+            // date picked without a time means "end of that day"
+            let expiresAt = null;
+            if (expiresDate) {
+                const t = new Date(expiresDate + 'T' + (expiresTime || '23:59:59')).getTime();
+                if (!Number.isFinite(t)) { alert('Invalid expiry date: ' + expiresDate); return; }
+                expiresAt = Math.floor(t / 1000);
+            }
+
+            if (!body) { alert('Body is required'); return; }
+            if (scope === 'account' && !accountId) { alert('Target Account ID is required for account scope'); return; }
+
+            try {
+                const res = await fetch('/admin/api/news', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scope, accountId, title, body, priority, expiresAt })
+                });
+                const data = await res.json();
+                if (data.error) { alert(data.errorMessage); return; }
+
+                document.getElementById('newTitle').value = '';
+                document.getElementById('newBody').value = '';
+                document.getElementById('newExpiresDate').value = '';
+                document.getElementById('newExpiresTime').value = '';
+                loadNews(1);
+            } catch (e) {
+                console.error('Error posting news:', e);
+            }
+        }
+
+        async function disableNews(id) {
+            id = decodeURIComponent(id);
+            try {
+                const res = await fetch('/admin/api/news/' + encodeURIComponent(id), { method: 'DELETE' });
+                const data = await res.json();
+                if (data.error) { alert(data.errorMessage); return; }
+                loadNews();
+            } catch (e) {
+                console.error('Error disabling news:', e);
+            }
+        }
+
+        async function enableNews(id) {
+            id = decodeURIComponent(id);
+            try {
+                const res = await fetch('/admin/api/news/' + encodeURIComponent(id) + '/enable', { method: 'POST' });
+                const data = await res.json();
+                if (data.error) { alert(data.errorMessage); return; }
+                loadNews();
+            } catch (e) {
+                console.error('Error enabling news:', e);
+            }
+        }
+
+        async function deleteNews(id) {
+            id = decodeURIComponent(id);
+            if (!confirm('Permanently delete this news item? This cannot be undone.')) return;
+            try {
+                const res = await fetch('/admin/api/news/' + encodeURIComponent(id) + '?permanent=true', { method: 'DELETE' });
+                const data = await res.json();
+                if (data.error) { alert(data.errorMessage); return; }
+                delete m_newsById[id];
+                loadNews();
+            } catch (e) {
+                console.error('Error deleting news:', e);
+            }
+        }
+
+        // Copies the item into the Post News form so it can be edited and
+        // re-posted as a new item (the original is left untouched).
+        function cloneNews(id) {
+            id = decodeURIComponent(id);
+            const n = m_newsById[id];
+            if (!n) return;
+            document.getElementById('newScope').value = n.scope;
+            toggleAccountField();
+            document.getElementById('newAccountId').value = n.account_id || '';
+            document.getElementById('newPriority').value = String(n.priority || 0);
+            document.getElementById('newTitle').value = n.title || '';
+            const expVal = toLocalInputValue(n.expires_at);
+            document.getElementById('newExpiresDate').value = expVal ? expVal.slice(0, 10) : '';
+            document.getElementById('newExpiresTime').value = expVal ? expVal.slice(11) : '';
+            document.getElementById('newBody').value = n.body || '';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            document.getElementById('newBody').focus();
+        }
+
+        async function loadFilters() {
+            try {
+                const res = await fetch('/admin/api/news/accounts');
+                const data = await res.json();
+                if (!data.error) {
+                    const sel = document.getElementById('filterAccount');
+                    data.accounts.forEach(a => {
+                        const opt = document.createElement('option');
+                        opt.value = a; opt.textContent = a;
+                        sel.appendChild(opt);
+                    });
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function loadNews(page) {
+            if (page) m_page = page;
+            const scope = document.getElementById('filterScope').value;
+            const accountId = document.getElementById('filterAccount').value;
+            const includeDisabled = document.getElementById('filterIncludeDisabled').checked;
+            const params = new URLSearchParams({ page: m_page, limit: m_limit, includeDisabled: includeDisabled });
+            if (scope) params.set('scope', scope);
+            if (accountId) params.set('accountId', accountId);
+
+            try {
+                const res = await fetch('/admin/api/news?' + params.toString());
+                const data = await res.json();
+                if (data.error) { alert(data.errorMessage); return; }
+
+                const bodyEl = document.getElementById('newsBody');
+                if (!data.rows || data.rows.length === 0) {
+                    bodyEl.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No news found</td></tr>';
+                } else {
+                    data.rows.forEach(n => { m_newsById[n.id] = n; });
+                    bodyEl.innerHTML = data.rows.map(n => `
+                        <tr class="${expiryClass(n.expires_at)}">
+                            <td class="small">${escapeHtml(n.id)}</td>
+                            <td class="small scope-${n.scope}">${escapeHtml(n.scope)}</td>
+                            <td class="small">${escapeHtml(n.account_id || '-')}</td>
+                            <td class="small priority-${n.priority}">${escapeHtml(PRIORITY_LABELS[n.priority] || n.priority)}</td>
+                            <td class="small">${escapeHtml(n.title || '-')}</td>
+                            <td class="small">${escapeHtml(n.body)}</td>
+                            <td class="small">${escapeHtml(fmtTime(n.expires_at))}</td>
+                            <td class="small">${escapeHtml(fmtTime(n.updated_at))}</td>
+                            <td class="small">${n.disabled ? 'disabled' : 'active'}</td>
+                            <td class="text-nowrap">
+                                <button class="btn btn-outline-light btn-icon btn-sm" title="Clone into Post News" onclick="cloneNews('${encodeURIComponent(n.id)}')">${ICON_CLONE}</button>
+                                ${n.disabled
+                                    ? `<button class="btn btn-outline-success btn-icon btn-sm" title="Activate" onclick="enableNews('${encodeURIComponent(n.id)}')">${ICON_EYE}</button>`
+                                    : `<button class="btn btn-outline-warning btn-icon btn-sm" title="Deactivate" onclick="disableNews('${encodeURIComponent(n.id)}')">${ICON_EYE_SLASH}</button>`}
+                                <button class="btn btn-outline-danger btn-icon btn-sm" title="Delete permanently" onclick="deleteNews('${encodeURIComponent(n.id)}')">${ICON_TRASH}</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+
+                const totalPages = data.totalPages || 1;
+                document.getElementById('pageInfo').textContent =
+                    `Page ${data.page} of ${totalPages} — ${data.total} total`;
+                document.getElementById('prevBtn').disabled = data.page <= 1;
+                document.getElementById('nextBtn').disabled = data.page >= totalPages;
+            } catch (e) {
+                console.error('Error loading news:', e);
+            }
+        }
+
+        function changePage(delta) { loadNews(m_page + delta); }
+        loadFilters().then(() => loadNews(1));
+    </script>
+</body>
+</html>

@@ -23,9 +23,17 @@ The storage server integrates with the DroneEngage system as follows:
 
 ## Installation
 
+The server is written in Rust. Install a stable toolchain
+([rustup](https://rustup.rs)), then build:
+
 ```bash
-npm install
+cargo build --release
 ```
+
+The binary is `target/release/de_storage_server`. Run it from the
+repository root: `server.config`, the `views/` and `public/` directories of
+the dashboard, the SSL files and relative database paths are found from the
+working directory.
 
 ## Configuration
 
@@ -54,12 +62,12 @@ Edit `server.config` to configure:
 ## Running
 
 ```bash
-npm start
+./target/release/de_storage_server
 ```
 
-For development with debugging:
+During development:
 ```bash
-npm run dev
+cargo run
 ```
 
 ### Command-line Options
@@ -70,8 +78,41 @@ npm run dev
 
 Example:
 ```bash
-node src/server.js --config=myconfig.config
+./target/release/de_storage_server --config=myconfig.config
 ```
+
+### S2S keys
+
+```bash
+cargo run --release --bin gen_s2s_keys -- DE_CommSrv
+```
+
+writes `ssl_local/DE_CommSrv_private.pem` and `ssl_local/DE_CommSrv_public.pem`.
+
+## Testing
+
+```bash
+cargo test
+```
+
+CI also runs `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`.
+
+## Differences from the Node.js server
+
+The Rust server replaces the Node.js one in place: the same `server.config`
+(and `.local` overlay), database file and schema, S2S protocol, dashboard
+URLs and API, and console output. Behaviour was checked by differential
+tests against the Node.js server (protocol, database contents, migration
+of old databases, startup failures, the dashboard's pages, headers, cookies
+and API). Known differences:
+
+- Dashboard views are Jinja templates (`views/*.html`, rendered with
+  minijinja) instead of EJS; the HTML they produce is the same.
+- The dashboard's error page (e.g. for a malformed JSON body) shows the
+  error without a stack trace, and JSON parse errors are worded
+  differently (also in the log).
+- Static files ignore `Range` requests (the whole file is sent).
+- `log_timeZone` supports UTC only.
 
 ## API
 

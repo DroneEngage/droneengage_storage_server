@@ -13,7 +13,7 @@ Two modes exist, selected by `s2s_cert_enabled`:
 | Certificate | `s2s_cert_enabled: true` | Ed25519 signature over the nonce, verified against `s2s_trusted_server_keys` |
 | Shared secret | `s2s_cert_enabled: false` | `HMAC-SHA256(nonce, shared_secret)` verified with `crypto.timingSafeEqual` |
 
-The implementation is in `src/js_s2s_auth.js` and uses only Node.js built-in `crypto` — no third-party dependencies.
+The implementation is in `src/s2s_auth.rs` (Ed25519 via ed25519-dalek, HMAC-SHA256 via the RustCrypto crates).
 
 ## Handshake Flow
 
@@ -119,7 +119,7 @@ The comm server's server ID must match a key in the storage server's `s2s_truste
 Use the provided script to generate an Ed25519 key pair:
 
 ```bash
-node scripts/gen_s2s_keys.js DE_CommSrv
+cargo run --release --bin gen_s2s_keys -- DE_CommSrv
 ```
 
 This generates two files in `ssl_local/`:
@@ -133,7 +133,7 @@ The private key file is written with restrictive permissions (`0o600`).
 
 ### Key Distribution Workflow
 
-1. Generate keys: `node scripts/gen_s2s_keys.js DE_CommSrv`
+1. Generate keys: `cargo run --release --bin gen_s2s_keys -- DE_CommSrv`
 2. Copy `DE_CommSrv_private.pem` to the comm server.
 3. Copy `DE_CommSrv_public.pem` to the storage server.
 4. Add to storage server config:
@@ -181,32 +181,26 @@ The private key file is written with restrictive permissions (`0o600`).
 
 ## Implementation Details
 
-### `js_s2s_auth.js` API
+### `s2s_auth.rs` API
 
 | Function | Description |
 |----------|-------------|
-| `fn_generateNonce()` | Generates a 32-byte random nonce (hex string) |
-| `fn_sign(nonce)` | Signs a nonce with the private key (base64 signature) |
-| `fn_verify(nonce, signature, serverId)` | Verifies a signature against a server's public key |
-| `fn_hmacSign(nonce)` | Computes `HMAC-SHA256(nonce, shared_secret)` (base64) |
-| `fn_verifyHmac(nonce, hmac)` | Constant-time verification of an HMAC response |
-| `fn_getSharedSecret(autoGenerate)` | Loads the shared secret from env/file; optionally auto-generates the file; throws on missing/placeholder |
-| `fn_hasSharedSecret()` | True when a secret source is configured (non-throwing) |
-| `fn_buildChallenge(nonce, method)` | Builds the challenge envelope JSON string |
-| `fn_buildResponse(nonce, id)` | Builds the Ed25519-signed response envelope JSON string |
-| `fn_buildHmacResponse(nonce, id)` | Builds the HMAC response envelope JSON string |
-| `fn_parseEnvelope(msg)` | Parses a WS message as an S2S auth envelope; returns `null` if not auth-related |
-| `fn_getPrivateKey()` | Lazy-loads and caches the Ed25519 private key |
-| `fn_getPublicKeys()` | Lazy-loads and caches all trusted public keys |
-| `fn_resetKeyCache()` | Clears key caches (used by tests) |
+| `generate_nonce()` | Generates a 32-byte random nonce (hex string) |
+| `build_challenge(nonce, method)` | Builds the challenge envelope JSON string |
+| `parse_envelope(msg)` | Parses a WS message as an S2S auth envelope; `None` if not auth-related |
+| `hmac_with(secret, nonce)` | Computes `HMAC-SHA256(nonce, secret)` (base64) |
+| `S2sAuth::verify(nonce, signature, server_id)` | Verifies a signature against a server's trusted public key |
+| `S2sAuth::verify_hmac(nonce, hmac)` | Constant-time verification of an HMAC response |
+| `S2sAuth::shared_secret_with(auto_generate)` | Loads the shared secret from env/file; optionally auto-generates the file; fails on missing/placeholder/short secrets |
+| `S2sAuth::public_keys()` / `private_key()` | Load and cache the configured keys |
 
 ### Key Caching
 
-Public and private keys are loaded lazily on first use and cached for the lifetime of the process. The `fn_resetKeyCache()` function clears these caches, which is useful in tests when the global config changes between test cases.
+Keys and the secret are loaded on first use and cached for the lifetime of the process; a failed load is retried on the next use.
 
 ### Path Resolution
 
-Key file paths in the config are resolved relative to the project root (one level up from the `src/` directory), not relative to the `js_s2s_auth.js` module itself.
+Key file paths in the config are resolved from the working directory (run the server from the repository root).
 
 ## SSL vs S2S Auth
 

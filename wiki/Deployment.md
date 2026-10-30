@@ -4,52 +4,39 @@ This document covers installation, running, SSL setup, and key generation for th
 
 ## Prerequisites
 
-- Node.js (tested with Node 18+)
-- npm
-- A SQLite-compatible filesystem for the database file
+- A stable Rust toolchain ([rustup](https://rustup.rs)) to build
+- A SQLite-compatible filesystem for the database file (SQLite is compiled in)
 
 ## Installation
 
 ```bash
 git clone <repo-url>
 cd droneengage_storage_server
-npm install
+cargo build --release
 ```
 
-### Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `ws` | WebSocket server |
-| `better-sqlite3` | SQLite database driver |
-| `express` | HTTP framework (reserved) |
-| `winston` | Logging (reserved) |
-| `node-cron` | Scheduled tasks (reserved) |
-| `axios` | HTTP client (reserved) |
-| `node-file-logger` | File-based logging |
+The binary is `target/release/de_storage_server`. It reads `server.config`,
+`views/`, `public/`, the SSL files and relative database paths from the
+working directory, so run it from the repository root.
 
 ## Running
 
 ### Production
 
 ```bash
-npm start
+./target/release/de_storage_server
 ```
 
-This runs `node src/server.js`.
-
-### Development (with debugger)
+### Development
 
 ```bash
-npm run dev
+cargo run
 ```
-
-This runs `node --inspect src/server.js`, enabling the Node.js debugger on port 9229.
 
 ### Custom Configuration
 
 ```bash
-node src/server.js --config=myconfig.config
+./target/release/de_storage_server --config=myconfig.config
 ```
 
 ### Port Override
@@ -57,7 +44,7 @@ node src/server.js --config=myconfig.config
 The WebSocket port can be overridden via environment variable without modifying the config file:
 
 ```bash
-de_storage_server_port=9100 npm start
+de_storage_server_port=9100 ./target/release/de_storage_server
 ```
 
 ## Command-Line Options
@@ -112,7 +99,7 @@ For environments where transport encryption is handled elsewhere (e.g., a revers
 Generate an Ed25519 key pair for S2S authentication:
 
 ```bash
-node scripts/gen_s2s_keys.js DE_CommSrv
+cargo run --release --bin gen_s2s_keys -- DE_CommSrv
 ```
 
 This creates:
@@ -203,7 +190,7 @@ After=network.target
 Type=simple
 User=droneengage
 WorkingDirectory=/opt/droneengage/droneengage_storage_server
-ExecStart=/usr/bin/node src/server.js
+ExecStart=/opt/droneengage/droneengage_storage_server/target/release/de_storage_server
 Restart=always
 RestartSec=5
 Environment=de_storage_server_port=9000
@@ -229,13 +216,14 @@ docker run -d \
 
 ## Testing
 
-### Mission Storage Tests
-
 ```bash
-node tests/test_mission_storage.js
+cargo test
 ```
 
-This runs an in-memory SQLite test suite that validates mission save/load/delete operations, account scoping, version incrementing, and cascade deletes. No real database file is touched.
+Unit and integration tests cover the database layer (including the
+migration of an old-schema database), the message handlers, quotas, the S2S
+shared-secret mode, the WebSocket server and the dashboard. They use
+temporary SQLite files and loopback ports; no real database is touched.
 
 ## Verification Checklist
 

@@ -6,7 +6,7 @@ This document describes the offline queue mechanism in the DroneEngage Storage S
 
 The offline queue buffers messages for units that are not currently connected to a comm server. When a unit comes back online, the queued messages are delivered to it via the comm server's WebSocket connection.
 
-The queue is implemented in `src/offlineQueue.js` and backed by the `offline_queue` table in SQLite.
+The queue is implemented in `src/offline_queue.rs` and backed by the `offline_queue` table in SQLite.
 
 ## Queue Lifecycle
 
