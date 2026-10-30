@@ -282,18 +282,20 @@ dependencies = [
 [[package]]
 name = "droneengage_server_common"
 version = "2.0.0"
-source = "git+https://github.com/HefnySco/prv_droneengage_server_common?branch=pr_rust#7a11d352311c6b26e655e25600c4f8bf7cff9abe"
+source = "git+https://github.com/HefnySco/prv_droneengage_server_common?branch=pr_rust#2497764a30ecd6fb803147d2b98f92525cb5d260"
 dependencies = [
  "base64",
  "bcrypt",
  "ed25519-dalek",
  "futures-util",
  "hmac",
+ "minijinja",
  "rand 0.8.8",
  "regex",
  "rustls",
  "rustls-pki-types",
  "serde_json",
+ "sha1 0.10.7",
  "sha2",
  "subtle",
  "tokio",

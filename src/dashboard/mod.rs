@@ -8,11 +8,8 @@
 //! (always the whole file).
 
 pub mod admin;
-pub mod csrf;
-pub mod http;
-pub mod limiter;
-pub mod session;
-pub mod views;
+
+pub use droneengage_server_common::web::{csrf, http, limiter, session, views};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -29,6 +26,39 @@ use self::http::{Request, Response};
 use crate::colors as c;
 use crate::server::Storage;
 use crate::util::{js_interp, js_truthy};
+
+/// helmet's Content-Security-Policy for this dashboard.
+pub const CSP: &str = "default-src 'self';base-uri 'self';font-src 'self';form-action 'self';frame-ancestors 'none';img-src 'self' data:;object-src 'none';script-src 'self' 'unsafe-inline';script-src-attr 'unsafe-inline';style-src 'self' 'unsafe-inline';upgrade-insecure-requests;connect-src 'self';frame-src 'none'";
+
+/// The headers every response starts with: helmet (v8) and cors.
+pub fn headers() -> &'static [(String, String)] {
+    static H: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    H.get_or_init(|| {
+        [
+            ("Content-Security-Policy", CSP),
+            ("Cross-Origin-Opener-Policy", "same-origin"),
+            ("Cross-Origin-Resource-Policy", "same-origin"),
+            ("Origin-Agent-Cluster", "?1"),
+            ("Referrer-Policy", "no-referrer"),
+            ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
+            ("X-Content-Type-Options", "nosniff"),
+            ("X-DNS-Prefetch-Control", "off"),
+            ("X-Download-Options", "noopen"),
+            ("X-Frame-Options", "SAMEORIGIN"),
+            ("X-Permitted-Cross-Domain-Policies", "none"),
+            ("X-XSS-Protection", "0"),
+            ("Access-Control-Allow-Origin", "*"),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+    })
+}
+
+/// A response with this dashboard's headers.
+pub fn response() -> Response {
+    Response::with_headers(headers())
+}
 
 pub struct App {
     pub storage: Arc<Storage>,
@@ -86,7 +116,7 @@ pub fn not_found(p_app: &App, p_req: &Request, p_res: &mut Response) {
     p_res.status = 404;
     match p_app.render("pages/404.html", minijinja::context! { title => "404", message => "Not found." }) {
         Ok(h) => p_res.html(p_req, h),
-        Err(e) => *p_res = Response::error_page(500, "Error", &e),
+        Err(e) => *p_res = Response::error_page(headers(), 500, "Error", &e),
     }
 }
 
@@ -124,7 +154,7 @@ fn serve_static(p_app: &App, p_req: &Request, p_rest: &str) -> Option<Response> 
     }
     let v_path = p_app.m_root.join("public").join(v_decoded.trim_start_matches('/'));
     let v_meta = std::fs::metadata(&v_path).ok()?;
-    let mut r = Response::new();
+    let mut r = response();
     if v_meta.is_dir() {
         if v_decoded.ends_with('/') {
             // no index.html
@@ -183,7 +213,7 @@ fn serve_file(p_req: &Request, p_path: &std::path::Path, mut r: Response) -> Opt
 pub fn handle(p_app: &App, p_req: &Request) -> Response {
     // cors(): every OPTIONS is a preflight
     if p_req.method == "OPTIONS" {
-        let mut r = Response::new();
+        let mut r = response();
         r.status = 204;
         r.set("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE");
         if let Some(h) = p_req.header("access-control-request-headers") {
@@ -197,7 +227,7 @@ pub fn handle(p_app: &App, p_req: &Request) -> Response {
         Ok(b) => b,
         Err(e) => {
             eprintln!("{}: {}", e.name, e.message);
-            return Response::error_page(e.status, e.name, &e.message);
+            return Response::error_page(headers(), e.status, e.name, &e.message);
         }
     };
     let v_path = p_req.path.as_str();
@@ -213,7 +243,7 @@ pub fn handle(p_app: &App, p_req: &Request) -> Response {
             return r;
         }
     }
-    let mut r = Response::new();
+    let mut r = response();
     if (p_req.method == "GET" || p_req.method == "HEAD") && v_path == "/" {
         r.redirect(p_req, &admin::admin_path(p_app, "/login"));
         return r;

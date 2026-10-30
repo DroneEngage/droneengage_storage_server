@@ -196,7 +196,7 @@ impl Ctx<'_> {
             Ok(html) => self.res.html(self.req, html),
             Err(e) => {
                 eprintln!("Error: {}", e);
-                self.res = Response::error_page(500, "Error", &e);
+                self.res = Response::error_page(super::headers(), 500, "Error", &e);
             }
         }
     }
@@ -233,7 +233,7 @@ pub fn handle(p_app: &App, p_req: &Request, p_body: &Value, p_path: &str) -> Opt
     let v_router = &p_app.admin;
     let Some(v_secret) = v_router.secret.clone() else {
         eprintln!("Error: secret option required for sessions");
-        return Some(Response::error_page(500, "Error", "secret option required for sessions"));
+        return Some(Response::error_page(super::headers(), 500, "Error", "secret option required for sessions"));
     };
     let v_session = v_router.sessions.load(p_req.cookie(session::COOKIE_NAME).as_deref(), &v_secret);
     let mut ctx = Ctx {
@@ -242,7 +242,7 @@ pub fn handle(p_app: &App, p_req: &Request, p_body: &Value, p_path: &str) -> Opt
         body: p_body,
         query: p_req.query(),
         session: v_session,
-        res: Response::new(),
+        res: super::response(),
         csrf_secret: String::new(),
     };
     let v_handled = route(&mut ctx, p_path);
@@ -287,7 +287,7 @@ fn route(ctx: &mut Ctx<'_>, p_path: &str) -> bool {
                 ctx.app.render("pages/404.html", minijinja::context! { title => "404", message => "Not found." });
             match v_page {
                 Ok(h) => ctx.res.html(ctx.req, h),
-                Err(e) => ctx.res = Response::error_page(500, "Error", &e),
+                Err(e) => ctx.res = Response::error_page(super::headers(), 500, "Error", &e),
             }
             return true;
         }
@@ -433,7 +433,7 @@ fn login(ctx: &mut Ctx<'_>) -> bool {
         Ok(false) => return v_fail(ctx, "Invalid username format"),
         Err(e) => {
             eprintln!("TypeError: {}", e);
-            ctx.res = Response::error_page(500, "TypeError", &e);
+            ctx.res = Response::error_page(super::headers(), 500, "TypeError", &e);
             return true;
         }
     }
@@ -464,7 +464,7 @@ fn login(ctx: &mut Ctx<'_>) -> bool {
                 };
                 let e = format!("Illegal arguments: {}, string", v_type);
                 eprintln!("Error: {}", e);
-                ctx.res = Response::error_page(500, "Error", &e);
+                ctx.res = Response::error_page(super::headers(), 500, "Error", &e);
                 return true;
             }
         }
