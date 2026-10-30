@@ -108,7 +108,7 @@ pub async fn run() {
     let v_file = v_args.get("config").map(str::to_string).unwrap_or_else(|| DEFAULT_CONFIG_FILENAME.to_string());
 
     let v_root: PathBuf = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let v_cfg = match Config::load(&v_root, &v_file, &|k| std::env::var(k).ok(), &|l| println!("{}", l)) {
+    let v_cfg = match crate::config::load(&v_root, &v_file, &|k| std::env::var(k).ok(), &|l| println!("{}", l)) {
         Ok(cfg) => cfg,
         Err(e) => {
             eprintln!("{}", e);

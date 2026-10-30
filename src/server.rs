@@ -102,7 +102,7 @@ impl Storage {
     ) -> Arc<Storage> {
         let v_method = if p_cfg.is_true("s2s_cert_enabled") { S2S_AUTH_METHOD_ED25519 } else { S2S_AUTH_METHOD_HMAC };
         Arc::new(Storage {
-            s2s: S2sAuth::new(&p_cfg, p_env_secret),
+            s2s: S2sAuth::new(&p_cfg, p_env_secret).with_mode_text("is active (s2s_cert_enabled=false)"),
             m_cfg: RwLock::new(p_cfg),
             db: p_db,
             log: p_log,

@@ -6,19 +6,17 @@
 //! wire protocol and console output.
 
 pub mod cli;
-pub mod colors;
 pub mod config;
 pub mod dashboard;
 pub mod db;
 pub mod handlers;
-pub mod js;
 pub mod logger;
-pub mod net;
 pub mod offline_queue;
-pub mod s2s_auth;
 pub mod server;
-pub mod util;
 pub mod ws_server;
+
+// shared with the other DroneEngage servers
+pub use droneengage_server_common::{colors, js, net, s2s_auth, util};
 
 use std::sync::Arc;
 

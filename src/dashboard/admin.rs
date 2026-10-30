@@ -413,91 +413,10 @@ fn route(ctx: &mut Ctx<'_>, p_path: &str) -> bool {
     api(ctx, p, &v_method)
 }
 
-/// isAlphanumeric (`/^[_a-z0-9]+$/i`); a non-string has no match().
-fn is_alphanumeric(p_value: &Value) -> Result<bool, String> {
-    match p_value {
-        Value::String(t) => Ok(!t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')),
-        _ => Err("str.match is not a function".into()),
-    }
-}
-
-fn is_email_part(p_part: &str) -> bool {
-    if p_part.is_empty() {
-        return false;
-    }
-    let mut v_prev_sep = true;
-    for u in p_part.encode_utf16() {
-        let v_word = (48..=57).contains(&u) || (65..=90).contains(&u) || (97..=122).contains(&u) || u == 95;
-        let v_sep = u == 46 || u == 45;
-        if !v_word && !v_sep {
-            return false;
-        }
-        if v_sep && v_prev_sep {
-            return false;
-        }
-        v_prev_sep = v_sep;
-    }
-    !v_prev_sep
-}
-
-/// isEmail (linear scan).
-fn is_email(p_value: &Value) -> bool {
-    let Value::String(t) = p_value else { return false };
-    let v_len = t.encode_utf16().count();
-    if v_len == 0 || v_len > 254 {
-        return false;
-    }
-    let (Some(i), Some(j)) = (t.find('@'), t.rfind('@')) else { return false };
-    if i == 0 || i != j || i == t.len() - 1 {
-        return false;
-    }
-    let v_domain = &t[i + 1..];
-    v_domain.contains('.') && is_email_part(&t[..i]) && is_email_part(v_domain)
-}
-
-/// `.length` of a JSON value (undefined for numbers, booleans, objects).
-fn length(p_value: &Value) -> Option<usize> {
-    match p_value {
-        Value::String(t) => Some(t.encode_utf16().count()),
-        Value::Array(a) => Some(a.len()),
-        Value::Object(m) => m.get("length").and_then(Value::as_f64).map(|f| f as usize),
-        _ => None,
-    }
-}
-
-fn valid_username(p_value: Option<&Value>) -> Result<bool, String> {
-    let Some(v) = p_value.filter(|v| !v.is_null()) else { return Ok(false) };
-    if let Some(l) = length(v) {
-        if !(3..=50).contains(&l) {
-            return Ok(false);
-        }
-    }
-    Ok(is_alphanumeric(v)? || is_email(v))
-}
-
-fn valid_password(p_value: Option<&Value>) -> bool {
-    let Some(v) = p_value.filter(|v| !v.is_null()) else { return false };
-    if let Some(l) = length(v) {
-        if !(8..=128).contains(&l) {
-            return false;
-        }
-    }
-    // !/\s/.test(String(password))
-    !crate::util::js_to_string(v).chars().any(|c| c.is_whitespace() || c == '\u{feff}')
-}
-
-/// isBcryptHash: /^\$2[abxy]\$\d{2}\$/
-pub fn is_bcrypt_hash(p_value: Option<&Value>) -> bool {
-    let Some(Value::String(t)) = p_value else { return false };
-    let b = t.as_bytes();
-    b.len() >= 7
-        && &b[..2] == b"$2"
-        && b"abxy".contains(&b[2])
-        && b[3] == b'$'
-        && b[4].is_ascii_digit()
-        && b[5].is_ascii_digit()
-        && b[6] == b'$'
-}
+use droneengage_server_common::config_handler::is_bcrypt_hash;
+use droneengage_server_common::validation::{
+    is_valid_admin_password as valid_password, is_valid_admin_username as valid_username,
+};
 
 /// POST /login
 fn login(ctx: &mut Ctx<'_>) -> bool {

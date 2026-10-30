@@ -220,6 +220,7 @@ dependencies = [
  "base64",
  "bcrypt",
  "bytes",
+ "droneengage_server_common",
  "ed25519-dalek",
  "futures-util",
  "hmac",
@@ -276,6 +277,30 @@ dependencies = [
  "block-buffer 0.12.1",
  "const-oid 0.10.2",
  "crypto-common 0.2.2",
+]
+
+[[package]]
+name = "droneengage_server_common"
+version = "2.0.0"
+source = "git+https://github.com/HefnySco/prv_droneengage_server_common?branch=pr_rust#7a11d352311c6b26e655e25600c4f8bf7cff9abe"
+dependencies = [
+ "base64",
+ "bcrypt",
+ "ed25519-dalek",
+ "futures-util",
+ "hmac",
+ "rand 0.8.8",
+ "regex",
+ "rustls",
+ "rustls-pki-types",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "uuid",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -1311,6 +1336,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]

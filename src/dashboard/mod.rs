@@ -222,54 +222,24 @@ pub fn handle(p_app: &App, p_req: &Request) -> Response {
     r
 }
 
-/// bcryptjs.hashSync(p, 10): a `$2a$10$` hash.
-fn bcrypt_hash(p_plain: &str) -> Option<String> {
-    bcrypt::hash_with_result(p_plain, 10).ok().map(|h| h.format_for_version(bcrypt::Version::TwoA))
-}
-
 /// handleConfig: `$$HASH$$('plaintext')` values (top-level keys) become
 /// bcrypt hashes in memory and in the config file.
 fn hash_config_values(p_storage: &Storage) {
-    let v_raw = p_storage.cfg().raw().clone();
-    let Value::Object(m) = v_raw else { return };
-    let v_re = regex::Regex::new(r#"\$\$HASH\$\$\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap();
-    let mut v_changed = false;
-    for (k, v) in m {
-        let Value::String(t) = &v else { continue };
-        let Some(v_plain) = v_re.captures(t).map(|c| c[1].to_string()) else { continue };
-        let Some(v_hash) = bcrypt_hash(&v_plain) else { continue };
-        p_storage.update_cfg(|c| c.set(&k, Value::String(v_hash)));
-        v_changed = true;
-        println!("{}[ConfigHandler] Hashed sensitive config value: {}{}", c::LOG, k, c::RESET);
-    }
-    if !v_changed {
+    let mut v_cfg = p_storage.cfg().raw().clone();
+    if !droneengage_server_common::config_handler::process_in_memory(&mut v_cfg) {
         return;
+    }
+    if let Value::Object(m) = &v_cfg {
+        p_storage.update_cfg(|c| {
+            for (k, v) in m {
+                if c.get(k) != Some(v) {
+                    c.set(k, v.clone());
+                }
+            }
+        });
     }
     let v_file = p_storage.cfg().file().to_path_buf();
-    let v_text = match std::fs::read_to_string(&v_file) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("{}[ConfigHandler] Cannot read config file for persistence: {}{}", c::ERROR, e, c::RESET);
-            return;
-        }
-    };
-    let v_file_re = regex::Regex::new(r#"\$\$HASH\$\$\(\s*(?:'([^']+)'|\\?"([^"\\]+)\\?")\s*\)"#).unwrap();
-    let mut v_any = false;
-    let v_updated = v_file_re.replace_all(&v_text, |caps: &regex::Captures| {
-        let v_plain = caps.get(1).or(caps.get(2)).map(|m| m.as_str()).unwrap_or("");
-        if v_plain.is_empty() {
-            return caps[0].to_string();
-        }
-        v_any = true;
-        bcrypt_hash(v_plain).unwrap_or_else(|| caps[0].to_string())
-    });
-    if !v_any {
-        return;
-    }
-    match std::fs::write(&v_file, v_updated.as_bytes()) {
-        Ok(()) => println!("{}[ConfigHandler] Config file updated — hashed values persisted.{}", c::SUCCESS, c::RESET),
-        Err(e) => eprintln!("{}[ConfigHandler] Failed to write config file: {}{}", c::ERROR, e, c::RESET),
-    }
+    droneengage_server_common::config_handler::persist_hashes(&v_file);
 }
 
 /// The dashboard listener; `run` reports it and serves.
