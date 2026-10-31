@@ -76,10 +76,12 @@ async fn login_pages_api_and_settings() {
     let v_dir = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink(concat!(env!("CARGO_MANIFEST_DIR"), "/views"), v_dir.path().join("views")).unwrap();
     std::fs::write(v_dir.path().join("t.config"), "{}").unwrap();
+    // dashboard_port 0 is falsy and means the default 9001, as in the JS server
+    let v_port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     let v_over = config(
         v_dir.path(),
         json!({
-            "dashboard_enable": true, "dashboard_port": 0, "dashboard_listening_ip": "127.0.0.1",
+            "dashboard_enable": true, "dashboard_port": v_port, "dashboard_listening_ip": "127.0.0.1",
             "admin_username": "admin", "admin_password": "Secret123!", "session_secret": "a-test-session-secret",
         }),
     );

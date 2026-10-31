@@ -16,7 +16,7 @@ name = "de_storage_server"
 path = "src/main.rs"
 
 [dependencies]
-droneengage_server_common = { git = "https://github.com/HefnySco/prv_droneengage_server_common", branch = "pr_rust" }
+droneengage_server_common = { git = "https://github.com/HefnySco/prv_droneengage_server_common", branch = "master" }
 base64 = "0.22"
 bcrypt = "0.17"
 bytes = "1"
