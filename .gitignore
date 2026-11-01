@@ -43,3 +43,6 @@ Thumbs.db
 
 # Rust build output
 target/
+
+# machine-local cargo config (scripts/local_server_common.sh)
+.cargo/
