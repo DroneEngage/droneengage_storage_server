@@ -17,7 +17,7 @@ data/
 server.config.local
 
 # S2S shared secret (auto-generated, chmod 600 — never commit)
-s2s_shared_secret.key
+s2s_shared_secret.key*
 
 # Environment
 .env
