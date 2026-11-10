@@ -1,6 +1,6 @@
 [package]
 name = "de_storage_server"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2021"
 description = "DroneEngage storage server: task, mission and news persistence for comm servers over an S2S-authenticated WebSocket, plus a read-mostly admin dashboard."
 authors = ["Mohammad Said Hefny <mohammad.hefny@gmail.com>"]
