@@ -235,7 +235,7 @@ pub fn handle(p_app: &App, p_req: &Request, p_body: &Value, p_path: &str) -> Opt
         eprintln!("Error: secret option required for sessions");
         return Some(Response::error_page(super::headers(), 500, "Error", "secret option required for sessions"));
     };
-    let v_session = v_router.sessions.load(p_req.cookie(session::COOKIE_NAME).as_deref(), &v_secret);
+    let v_session = v_router.sessions.load(p_req.cookie(session::cookie_name()).as_deref(), &v_secret);
     let mut ctx = Ctx {
         app: p_app,
         req: p_req,
@@ -294,12 +294,12 @@ fn route(ctx: &mut Ctx<'_>, p_path: &str) -> bool {
     }
 
     // CSRF: the secret cookie, then the token check for writes
-    ctx.csrf_secret = match ctx.req.cookie(csrf::COOKIE_NAME) {
+    ctx.csrf_secret = match ctx.req.cookie(csrf::cookie_name()) {
         Some(v) if !v.is_empty() => v,
         _ => {
             let v = csrf::new_secret();
             ctx.res
-                .append("Set-Cookie", format!("{}={}; Path=/", csrf::COOKIE_NAME, super::http::encode_component(&v)));
+                .append("Set-Cookie", format!("{}={}; Path=/", csrf::cookie_name(), super::http::encode_component(&v)));
             v
         }
     };
