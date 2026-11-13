@@ -46,3 +46,7 @@ target/
 
 # machine-local cargo config (scripts/local_server_common.sh)
 .cargo/
+
+# never publish: private keys, per-machine config, shared secrets
+*.key
+*_private.pem
