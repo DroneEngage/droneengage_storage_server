@@ -102,7 +102,7 @@ CI also runs `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`
 Configuration loading, JavaScript-compatible JSON handling, the file
 logger, TLS, S2S authentication, admin validation and `$$HASH$$` handling
 come from
-[droneengage_server_common](https://github.com/HefnySco/prv_droneengage_server_common)
+[droneengage_server_common](https://github.com/DroneEngage/droneengage_server_common)
 (branch `pr_rust`), shared with the comm server and the authenticator.
 
 ## Differences from the Node.js server
